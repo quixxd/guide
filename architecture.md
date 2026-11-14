@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, and the decision log (§14) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, §14 compares LLM providers, and the decision log (§15) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -61,6 +61,8 @@ Design rules that hold for every option:
 - ~1 minute of user speech per hour (push-to-talk).
 
 ### Writing the narration (Claude API, current list prices)
+
+Other providers are compared in §14.
 
 | Model | Input / output per 1M tokens | Live narration cost per hour |
 |---|---|---|
@@ -352,7 +354,68 @@ The main tension is **one language everywhere** (shared types, shared logic, one
 - Choosing fully native or Flutter for the app (§10) breaks E1/E4 sharing. Contracts would then go schema-first, and E3's TypeScript advantage shrinks.
 - If the content pipeline turns out to be mostly data science (ranking notability, entity matching across OSM, Wikidata, and Overture), Python for E5 becomes the better call.
 
-## 14. Decision log
+## 14. LLM provider
+
+The model that writes the narration was never chosen explicitly. Claude was assumed from the start, and the prototype uses Claude Sonnet 5.5. This section compares the alternatives on equal terms. (It was drafted by Claude, an Anthropic model, so the comparison deliberately avoids quality claims that haven't been measured.)
+
+### Two jobs, two tiers
+
+- **Live narration and push-to-talk answers:** many short calls, and speed to the first words matters. In A the model reads raw source text (large input). In B it turns compact fact cards into speech (small input), which is the job of a fast, cheap model.
+- **Building fact and area cards (B) and hard questions:** fewer, larger calls, often batched. Accuracy and faithfulness to the sources matter more than speed.
+
+### Cost per tour hour
+
+Assumptions: ~50 calls per hour (40 segments + 10 answers) and ~6,000 output tokens per hour (≈4,500 spoken words). **B (fact cards):** ~3k input tokens per call ≈ 150k input per hour. **A (raw sources):** ~10k input per call ≈ 500k input per hour, before any prompt caching.
+
+Fast tier (live narration in B):
+
+| Provider | Model | $ per 1M tokens, input / output | ≈ $ per tour hour (B) |
+|---|---|---|---|
+| Anthropic | Claude Haiku 5.5 | 0.10 / 0.50 | ~0.02 |
+| OpenAI | GPT-5 nano | 0.05 / 0.40 | ~0.01 |
+| OpenAI | GPT-5 mini | 0.25 / 2.00 | ~0.05 |
+| Google | Gemini 3.1 Flash-Lite | 0.25 / 1.50 | ~0.05 |
+| Google | Gemini Flash (newest) | ~0.75–1.50 / 3.75–9.00 (sources disagree) | ~0.13–0.28 |
+| Open-weight, hosted (Groq, Together, Fireworks) | GPT-OSS 120B | 0.15 / 0.60 | ~0.03 |
+| Open-weight, hosted | Llama 4 Scout | ~0.11–0.18 / 0.34–0.59 | ~0.02–0.03 |
+
+Strong tier (fact cards; live narration in the prototype):
+
+| Provider | Model | $ per 1M tokens, input / output | ≈ $ per tour hour (A, no caching) |
+|---|---|---|---|
+| Anthropic | Claude Sonnet 5.5 | 2 / 10 | ~1.05 |
+| Anthropic | Claude Opus 5.5 | 4 / 20 | ~2.10 |
+| Google | Gemini 3.1 Pro | 2 / 12 | ~1.10 |
+| OpenAI | GPT-5.4 mini | 0.75 / 4.50 | ~0.40 |
+| Mistral | Mistral Large 3 (open weights, EU company) | 0.50 / 1.50 | ~0.26 |
+| Zhipu | GLM-5.3 (open weights) | ~1.20–1.40 / 4.40–6.00 | ~0.65–0.75 |
+
+Batch APIs are ~50% off at Anthropic, OpenAI, and Google, which applies to card building. Prompt caching cuts repeated input sharply at all three. Every price here comes from third-party trackers as of Nov 2026, and they disagree in places. Check the providers' own pricing pages before relying on them.
+
+**What this shows:** in B, every provider's fast tier costs cents per tour hour, against ~$0.45 for the voice. **Price doesn't decide the provider.** It only matters for A (the prototype) and for card building, where the spread is roughly 4–8×.
+
+### What does decide it
+
+| Criterion | Why it matters here | What we know |
+|---|---|---|
+| **Sticking to the sources** | The spec rules out made-up facts. Narration must use only the SOURCES block. | Unmeasured for our prompts. Has to be tested. |
+| **Sounding good spoken aloud** | Natural, varied, at the right length for the word budget | Unmeasured. Has to be judged by listening. |
+| **Time to first words** | Commentary must start before the place is passed | Varies by model, load, and region. Specialised hardware hosts (Groq, Cerebras) are typically fastest for open-weight models. Has to be measured from our server. |
+| **Voice and speech from the same vendor** | One vendor, one bill, one integration | OpenAI and Google also sell text-to-speech and speech recognition (and speech-to-speech APIs). Anthropic doesn't sell TTS, so a Claude setup needs a second vendor for the voice. |
+| **Current events (*Today* lens)** | Needs web search | Anthropic, OpenAI, and Google all offer built-in web search tools. Google's grounding with Google Search is the most direct fit. |
+| **Data location and privacy** | Prompts include the listener's surroundings, though not their identity | All major providers offer EU data processing options. Mistral is EU-based. |
+| **Stability** | Models get retired and prices change | Hosted open-weight models churn fastest (e.g. a DeepSeek model reported retired in Sep 2026). The big three give deprecation notice. |
+| **Free tier for testing** | Lower prototype cost | Google keeps a free tier for Flash and Flash-Lite. |
+
+Self-hosting an open-weight model on our own GPUs isn't worth it at our scale: hosted inference is already cents per hour.
+
+### Recommendation
+
+1. **Don't pick on paper. Measure.** Build a small eval: ~20 real segment plans (Lisbon walk, Porto, Sintra drive, a bus stretch), each with its SOURCES and word budget, run through 4–6 candidates. Score each on facts traceable to the sources, word-budget accuracy, how it sounds read aloud, time to first words, and cost. Candidates: Claude Haiku 5.5 and Sonnet 5.5, GPT-5 mini (or GPT-5.4 mini), Gemini 3.1 Flash-Lite and Flash, and GPT-OSS 120B or Llama on Groq. A run costs a few dollars.
+2. **Make the provider swappable first.** Only `server/narrator.ts` calls the model. Put a small interface in front of it (stream text for a system + user prompt), so switching, or using one provider for live narration and another for cards, is a config change.
+3. **Until then,** the prototype keeps Claude Sonnet 5.5, because it's already wired up. That's a default, not a decision.
+
+## 15. Decision log
 
 | # | Topic | Decision | Alternatives considered | Status |
 |---|---|---|---|---|
@@ -371,5 +434,6 @@ The main tension is **one language everywhere** (shared types, shared logic, one
 | 13 | Monetization | One free tour, then hour-based passes and top-ups (`monetization.md`) | Passes only; freemium subscription; ads + paid; pay-as-you-go | Decided |
 | 14 | Languages, prototype | TypeScript on the server (Node 24, no build); plain JavaScript in the browser (§12) | — (chosen to get the prototype running, not discussed) | In place |
 | 15 | Languages, full system | Leading candidate: TypeScript for app, server, shared core, and pipeline; Swift/Kotlin only for native modules; Python allowed for heavy data processing (§13) | Python server; Go or Elixir server; native or Flutter app (Swift/Kotlin, Dart) | Open |
+| 16 | LLM provider | Open. Prototype default: Claude Sonnet 5.5 (already wired up). Next: make the provider swappable, then pick by a measured eval (§14). | Claude (Haiku, Sonnet, Opus); OpenAI (GPT-5 nano/mini, GPT-5.4 mini); Google (Gemini Flash-Lite, Flash, Pro); hosted open-weight models (GPT-OSS, Llama, Mistral, GLM); self-hosted open weights (not worth it at our scale) | Open |
 
 Product decisions (controls, cards, lenses, languages, scope) are logged in `spec.md` §11.

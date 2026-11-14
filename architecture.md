@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, and the decision log (§13) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, and the decision log (§14) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -328,7 +328,31 @@ The first prototype is a deliberately stripped-down A. These are its choices; se
 | Map | Leaflet with OSM tiles | MapLibre + vector tiles | Optional, per the spec |
 | Sessions | In memory, lost on restart | Redis / Postgres | Persistent |
 
-## 13. Decision log
+## 13. Code environments and languages
+
+Every place our code runs, the language options for it, and a recommendation. None of these were decided explicitly before. The prototype's choices (TypeScript on the server, plain JavaScript in the browser) were made to get it running.
+
+The main tension is **one language everywhere** (shared types, shared logic, one toolchain, one person can work across the whole system) against **the best tool for each job** (Python for data work, Swift/Kotlin for deep phone integration, Go for very many connections).
+
+| # | Environment | What runs there | Options | Recommendation |
+|---|---|---|---|---|
+| E1 | **Phone app** | Screens, tour engine, position, audio, push-to-talk | TypeScript (web, Capacitor, Expo); Swift + Kotlin (native); Dart (Flutter) | **TypeScript.** It follows from the front-end leading candidate (Expo, §10). Prototype: keep plain JavaScript until the engine is split out of `app.js`, then make the engine TypeScript. |
+| E2 | **Native phone modules** | CarPlay / Android Auto, edge cases in background audio and location that libraries don't cover | Swift (iOS) + Kotlin (Android); none if libraries suffice | **Swift + Kotlin, only when needed,** as small Expo modules. No native code until a feature requires it. |
+| E3 | **Tour server** (orchestrator + API) | Sessions, planner, LLM streaming, TTS streaming, WebSocket/streaming HTTP, auth, purchase webhooks | TypeScript/Node (current); Python (FastAPI); Go; Kotlin/JVM; Elixir | **TypeScript/Node.** The work is mostly waiting on I/O (LLM, TTS, data). The Anthropic SDK is first-class, types are shared with the app, and it's already written. Go or Elixir only become interesting at very large numbers of simultaneous tours. |
+| E4 | **Shared core** | Planner, geometry, lens definitions, API event types | TypeScript package used by both app and server; schema-first contracts (JSON Schema / OpenAPI) if languages diverge | **A shared TypeScript package.** Bonus: the planner can then also run on the phone, which the offline roadmap item needs. If another language joins, generate JSON Schema from the TypeScript schemas (e.g. Zod). |
+| E5 | **Content pipeline** (batch jobs) | Building and checking fact and area cards, refreshing them when Wikipedia changes, pre-rendering audio (C), Claude batch calls | TypeScript (same as server); Python | **TypeScript by default,** since cards use the same schemas as the server. **Python is allowed for heavy one-off data processing** where its libraries are clearly better (Wikipedia dump parsing, `pyosmium`, data analysis). |
+| E6 | **Geo data and routing** | PostGIS, Valhalla / OSRM, importing OSM, Overture, and Wikidata | Not our code to write: SQL, osm2pgsql's Lua style files, routing config files | **SQL + config files.** Keep geo queries in SQL (PostGIS), called from E3/E5. |
+| E7 | **Quality tools** | Unit tests, simulated and replayed tours, narration quality evals, end-to-end app tests | node:test (current); Vitest; Playwright (web); Maestro or Detox (Expo); Python for evals | **node:test now; Vitest once there's an app package.** Playwright for the web prototype, Maestro for the Expo app. Narration evals in TypeScript next to the prompts, unless the eval tooling we pick is Python-only. |
+| E8 | **Infrastructure** | Container builds, deploy config, cloud resources | Platform config files (Dockerfile, `fly.toml`); OpenTofu/Terraform (HCL); Pulumi (TypeScript) | **Dockerfile + platform config at first.** Add OpenTofu, or Pulumi if staying in TypeScript, only when resources outgrow one platform (H2/H3 in §11). |
+| E9 | **Web pages** (later) | Landing page, web checkout where allowed, an internal tool for reviewing fact cards | Static site (Astro); React (Next.js, Vite); the content-review tool could be server-rendered by E3 | **TypeScript.** Astro for the public site; the review tool as a small React or server-rendered page on E3. Not needed before B. |
+
+**Repository shape that fits the recommendation:** one repository with npm workspaces: `app/` (E1, E2), `server/` (E3), `shared/` (E4), `pipeline/` (E5), plus `infra/` (E8). Moving to it can wait until the app or the pipeline starts.
+
+**What would change the recommendation:**
+- Choosing fully native or Flutter for the app (§10) breaks E1/E4 sharing. Contracts would then go schema-first, and E3's TypeScript advantage shrinks.
+- If the content pipeline turns out to be mostly data science (ranking notability, entity matching across OSM, Wikidata, and Overture), Python for E5 becomes the better call.
+
+## 14. Decision log
 
 | # | Topic | Decision | Alternatives considered | Status |
 |---|---|---|---|---|
@@ -345,5 +369,7 @@ The first prototype is a deliberately stripped-down A. These are its choices; se
 | 11 | Hosting, prototype | Laptop + Cloudflare quick tunnel (§11) | Named tunnel; PaaS container; serverless | Decided |
 | 12 | Hosting, production | Leading candidate: PaaS + managed Postgres + R2, with routing and batch jobs on a rented server (§11) | Hyperscaler; rented servers only; edge-first | Deferred |
 | 13 | Monetization | One free tour, then hour-based passes and top-ups (`monetization.md`) | Passes only; freemium subscription; ads + paid; pay-as-you-go | Decided |
+| 14 | Languages, prototype | TypeScript on the server (Node 24, no build); plain JavaScript in the browser (§12) | — (chosen to get the prototype running, not discussed) | In place |
+| 15 | Languages, full system | Leading candidate: TypeScript for app, server, shared core, and pipeline; Swift/Kotlin only for native modules; Python allowed for heavy data processing (§13) | Python server; Go or Elixir server; native or Flutter app (Swift/Kotlin, Dart) | Open |
 
 Product decisions (controls, cards, lenses, languages, scope) are logged in `spec.md` §11.

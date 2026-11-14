@@ -318,7 +318,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 | Different listeners | Treated as one audience | Speaker recognition (Roadmap) |
 | Free use and payment | One free tour, then hour-based passes; remaining time not shown, with a spoken heads-up instead (UC-15, `monetization.md`) | Showing remaining time (to decide later); ads; unlimited plans |
 
-Technical decisions (architecture, voice, data, front end, hosting) are logged in `architecture.md` §13.
+Technical decisions (architecture, voice, data, front end, hosting, languages) are logged in `architecture.md` §14.
 
 ## 12. Open questions
 

@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, §14 compares LLM providers, and the decision log (§15) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, §14 compares LLM providers, §15 covers data storage, and the decision log (§16) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -415,7 +415,74 @@ Self-hosting an open-weight model on our own GPUs isn't worth it at our scale: h
 2. **Make the provider swappable first.** Only `server/narrator.ts` calls the model. Put a small interface in front of it (stream text for a system + user prompt), so switching, or using one provider for live narration and another for cards, is a config change.
 3. **Until then,** the prototype keeps Claude Sonnet 5.5, because it's already wired up. That's a default, not a decision.
 
-## 15. Decision log
+## 15. Data storage
+
+Earlier sections assumed Postgres with PostGIS plus object storage without comparing alternatives. This section lists the data we'll hold, compares storage architectures, and recommends one per stage.
+
+### What we store
+
+| # | Data | Shape and access pattern | Size (rough) | If it's lost |
+|---|---|---|---|---|
+| D1 | **Geo knowledge base**: places, named features, links to Wikidata, Wikipedia, and Overture | Read-heavy spatial queries: within a radius, along the road ahead, nearest. Bulk imports and periodic refreshes. | A few GB per continent (places and named features, not every road) | Rebuild from sources (hours) |
+| D2 | **Source text**: Wikipedia extracts and articles, Wikidata facts, keyed by revision | Read by card building and the A path; refreshed when sources change | A few GB (geotagged articles only); raw dumps much larger | Rebuild from dumps |
+| D3 | **Fact and area cards** (B) | Small structured documents (a few KB), per place and lens, versioned against source revisions, with verification status | A few GB per million places | Regenerate (costs LLM money) |
+| D4 | **Audio library** (C) | Immutable audio files, read through a CDN; metadata (place, lens, length, voice) is a small table | ~1.3 TB per 100k fully covered places | Re-render (costs TTS money) |
+| D5 | **Live sessions** | Small state per tour (covered places, recent segments, steering), written once per segment, gone after hours | Tiny | The tour loses its memory mid-walk |
+| D6 | **Accounts and entitlements**: user, free-tour flag, passes, top-ups, purchase receipts | Relational, transactional, low volume, must be exactly right | Tiny | **Irreplaceable: money and trust** |
+| D7 | **Listening-time ledger** | Append-only usage events (seconds listened per segment). Balance = sum. Must not double-count across reconnects or devices. | Small | **Irreplaceable: billing** |
+| D8 | **Tour history and location traces** | Personal data. Needed for the recap and visited-places log (roadmap), debugging, and evals. | Small per user | Annoying, not critical |
+| D9 | **Analytics, costs, logs** | Append-heavy product events, per-call LLM/TTS cost and latency, error logs; analytical queries | Grows fastest | Loss of insight |
+| D10 | **Search for push-to-talk answers** | Find relevant facts for a question | Derived from D2/D3 | Rebuild |
+| D11 | **On the phone**: settings, sign-in token, later offline region packs | Key-value; packs are read-only bundles of places, cards, and audio | KB; packs tens to hundreds of MB | Re-download |
+
+Two observations shape the choice:
+- **Recoverability splits the data in two.** D1–D4 and D10 are big and rebuildable from sources. D6–D7 are tiny and irreplaceable. They need different backup and change regimes, even if they sit on the same database server.
+- **Retrieval for questions is geo-first.** A question on a walk is almost always about something nearby. Filtering by location narrows the candidates to ~20 places, and their cards fit straight into the prompt. Vector search is a later optimisation, not a requirement.
+
+### Storage architectures compared
+
+| | S1. Postgres-centric | S2. Specialised stores (polyglot) | S3. Edge / serverless-native | S4. Backend-as-a-service | S5. Pre-built static data files |
+|---|---|---|---|---|---|
+| What it is | One Postgres with PostGIS (geo), JSONB (cards), full-text and later pgvector (search), ordinary tables (accounts, ledger, sessions). Object storage for audio and dumps. | PostGIS for geo, a document database (MongoDB, DynamoDB) for cards, Redis/Valkey for sessions, a vector database (Qdrant, Pinecone), a warehouse (ClickHouse, BigQuery) for analytics | Cloudflare D1 (SQLite), KV, Durable Objects storage, Vectorize, R2; or Turso (libSQL) | Firebase / Firestore, or Supabase (Postgres plus auth, storage, functions) | The pipeline bakes places and cards into per-region tiles or SQLite files on object storage + CDN; the server and app read them directly |
+| Geo queries | **Best in class** (PostGIS: radius, corridor, nearest, OSM import tools) | Best in class (PostGIS stays) | Weak: no PostGIS. Geohash or R-tree workarounds; geo still needs PostGIS elsewhere | Firestore: geohash only, no real spatial queries. Supabase: full PostGIS. | Pre-computed per tile; no ad-hoc queries |
+| Transactions for money data | Yes, one database | Only within each store | Per database (SQLite) | Firestore: limited. Supabase: yes. | No; needs a database alongside |
+| Systems to run | 1 database + object storage | 4–6 | Several, but managed | 1 platform | Build pipeline + CDN, plus a database for D5–D9 |
+| Cost at the start | ~$25–300/month | Several times S1 | Very low | Free tier, then usage-based | Very low to serve |
+| Scaling limits | Analytics at large volume; vector search beyond tens of millions of items; geo imports competing with app traffic (fix: separate instances) | Scales per store | Database size caps (e.g. ~10 GB per D1 database), runtime limits | Firestore query model; Supabase as S1 | Freshness: every change needs a re-bake |
+| Lock-in | Low (standard Postgres, available everywhere) | Medium | High | Firestore: high. Supabase: low (it's Postgres). | Low |
+| Fit for a one-person team | **High** | Low | Medium | Firestore: poor (no geo). Supabase: high. | High for read-only content |
+
+Ruled out: **Firestore as the main store** (no real spatial queries, awkward for the ledger); **a dedicated vector database at launch** (geo-first retrieval makes it unnecessary); **a warehouse at launch** (Postgres tables or an analytics service cover early volumes); **Google Places or similar as a store** (terms forbid caching, §3).
+
+### Per data kind: options and recommendation
+
+| Data | Options | Recommendation |
+|---|---|---|
+| D1 Geo | PostGIS; MongoDB geospatial; Elasticsearch/OpenSearch geo; SQLite + R-tree/SpatiaLite; DuckDB spatial (batch only) | **PostGIS**, imported with osm2pgsql plus Overture/Wikidata loaders. DuckDB spatial is handy in the pipeline for crunching Overture files before loading. |
+| D2 Source text | Postgres tables; object storage (raw dumps, extracts as files) | **Raw dumps in object storage; parsed extracts in Postgres**, keyed by page and revision so cards know when they're stale |
+| D3 Cards | Postgres JSONB; document database; versioned JSON files in object storage | **Postgres JSONB**, with columns for place, lens, source revisions, model, verification status, and version |
+| D4 Audio | Cloudflare R2; S3 + CloudFront; Google Cloud Storage; Bunny | **R2** (free egress); metadata table in Postgres |
+| D5 Sessions | In memory (current); Postgres row per session; Redis/Valkey; Durable Objects (if edge, §11 H4) | **In memory, saved to Postgres after each segment**, so a restart or reconnect resumes the tour. Add Redis only if load demands it. |
+| D6 Accounts and purchases | Postgres; RevenueCat as the purchase record; identity via Sign in with Apple/Google, Supabase Auth, Clerk, Firebase Auth | **RevenueCat as the record of purchases** (it validates App Store and Play receipts), mirrored into **Postgres** by webhook. Accounts start anonymous (device-bound), with Apple/Google sign-in added to move between devices. |
+| D7 Listening ledger | Postgres append-only table; event stream (Kafka etc.) | **Postgres append-only table** with an idempotency key (session + segment number), so retries and reconnects can't double-count. Pass balance = allowance − sum. RevenueCat doesn't meter hours, so this is ours. |
+| D8 History and traces | Store full traces; store visited place IDs only; keep nothing server-side | **Visited place IDs per tour, no raw traces by default.** That's enough for the recap and visited-places log. Raw traces only with opt-in (testing, recorded walks for regression), deleted after a fixed period (e.g. 30 days). EU region. |
+| D9 Analytics, costs, logs | Postgres tables; PostHog (EU cloud or self-hosted); ClickHouse / BigQuery later; platform logs + Sentry | **PostHog (EU)** for product events; **a Postgres table for per-call LLM/TTS cost and latency** (needed to check margins per pass); platform logs + Sentry for errors. A warehouse only when volume demands it. |
+| D10 Search | Geo filter only; Postgres full-text; pgvector; dedicated vector database | **Geo filter first.** Add Postgres full-text and **pgvector** for questions that reach beyond what's nearby ("what else did this architect build?"). |
+| D11 On the phone | Key-value (MMKV / AsyncStorage) for settings; offline packs as SQLite, PMTiles/FlatGeobuf, or JSON bundles | **Key-value for settings; SQLite for offline packs** (places, cards, R-tree index) plus audio files. The planner can query it on the phone, and the same bundles can feed S5 later. |
+
+### Recommendation by stage
+
+- **Prototype (now): in memory**, as built. Everything resets on restart: sessions, and cached Wikipedia and OpenStreetMap results. Cheap optional improvement: a local SQLite file (Node's built-in `node:sqlite`) for the external-API cache and sessions, so restarts don't lose them and Overpass gets hit less. Not needed for field tests.
+- **MVP (B): S1, Postgres-centric**, plus R2, RevenueCat, and PostHog. Two logical databases from day one:
+  - **content** (D1–D3, D10): big, rebuildable, loaded by the pipeline. It can live on the rented server next to routing (§11 H3).
+  - **app** (D5–D9): small, irreplaceable, on a managed Postgres with point-in-time backups.
+
+  They can share one server at first and split when imports start competing with app traffic.
+- **Scale and offline (C): add S5.** Bake hot regions into static SQLite or tile bundles on R2 behind a CDN. The same artifact serves fast lookups and offline downloads. Postgres stays the source of truth.
+
+Revisit if: the full app goes edge-first (§11 H4), which pulls sessions toward Durable Objects; analytics outgrow Postgres and PostHog (add ClickHouse or BigQuery); or questions need broad semantic search at scale (consider a dedicated vector database).
+
+## 16. Decision log
 
 | # | Topic | Decision | Alternatives considered | Status |
 |---|---|---|---|---|
@@ -435,5 +502,7 @@ Self-hosting an open-weight model on our own GPUs isn't worth it at our scale: h
 | 14 | Languages, prototype | TypeScript on the server (Node 24, no build); plain JavaScript in the browser (§12) | — (chosen to get the prototype running, not discussed) | In place |
 | 15 | Languages, full system | Leading candidate: TypeScript for app, server, shared core, and pipeline; Swift/Kotlin only for native modules; Python allowed for heavy data processing (§13) | Python server; Go or Elixir server; native or Flutter app (Swift/Kotlin, Dart) | Open |
 | 16 | LLM provider | Open. Prototype default: Claude Sonnet 5.5 (already wired up). Next: make the provider swappable, then pick by a measured eval (§14). | Claude (Haiku, Sonnet, Opus); OpenAI (GPT-5 nano/mini, GPT-5.4 mini); Google (Gemini Flash-Lite, Flash, Pro); hosted open-weight models (GPT-OSS, Llama, Mistral, GLM); self-hosted open weights (not worth it at our scale) | Open |
+| 17 | Data storage, prototype | In memory: sessions and external-API caches reset on restart (§12, §15). Optional: a local SQLite file. | — (chosen to get the prototype running) | In place |
+| 18 | Data storage, full system | Leading candidate: Postgres-centric (PostGIS, JSONB, later pgvector), split into a rebuildable content database and an irreplaceable app database; R2 for audio; RevenueCat as the purchase record; PostHog (EU) for analytics; append-only listening ledger; no raw location traces by default. Static region bundles added for scale and offline (§15). | Specialised stores (document DB, Redis, vector DB, warehouse); edge-native (D1, KV, Durable Objects); Firestore (no spatial queries); static files only | Open |
 
 Product decisions (controls, cards, lenses, languages, scope) are logged in `spec.md` §11.

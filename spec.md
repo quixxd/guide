@@ -1,6 +1,6 @@
 # Audio Tour Guide: Use Cases & User Scenarios
 
-Status: draft v0.3, written for discussion. This covers *what* the app does for the user, not how it is built.
+Status: draft v0.4, written for discussion. Decisions taken so far, with the alternatives considered, are in §11. This covers *what* the app does for the user, not how it is built.
 
 ## 1. Vision
 
@@ -300,6 +300,26 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 - **Planned routes and destination input.**
 - **Speaker recognition:** tailoring to different listeners in the same car.
 
-## 11. Open questions
+## 11. Decisions and alternatives considered
+
+| Topic | Decision | Alternatives considered |
+|---|---|---|
+| Control | Buttons first. Pause/Continue and Stop always visible; speaking only through a push-to-talk button (§4). | Voice-first control, an always-on microphone, a wake word (hands-free voice is on the Roadmap) |
+| Topic card tap | Takes effect at the next natural break, without cutting off the current sentence (UC-7) | Cutting in immediately |
+| Topic card trail | Current card plus up to 5 recent ones; older cards drop off | A scrollable history (a visited-places log is on the Roadmap instead) |
+| Headset / car play-pause button | Works as Pause/Continue, so a driver never needs the screen | Ignoring media buttons |
+| Driving | No taps needed once the tour starts; passengers do the steering (UC-9) | Requiring taps while driving |
+| Lenses | The 13 in §5, *Surprise me* by default. Tone and depth ("for the kids", "in depth") are set by voice, not as lenses. | *Military History*, *Science & Engineering*, *Transport* (Roadmap); tone and depth as lenses |
+| Language | English only, for narration and push-to-talk | Several languages at launch (Roadmap) |
+| Platform | Phone only | Desktop or car screens at launch (CarPlay / Android Auto on the Roadmap) |
+| Kind of tour | Spontaneous only, starting where you are; the path is inferred from position and direction | Planned tours, destination or route input (out of scope for now, Roadmap) |
+| Restaurants and cafés | Brief mentions as places along the way | Reviews, bookings, opening hours (out of scope) |
+| Losing the connection | Finish what's already loaded, say so, and pause (UC-13) | Offline commentary (Roadmap) |
+| Different listeners | Treated as one audience | Speaker recognition (Roadmap) |
+| Free use and payment | One free tour, then hour-based passes; remaining time not shown, with a spoken heads-up instead (UC-15, `monetization.md`) | Showing remaining time (to decide later); ads; unlimited plans |
+
+Technical decisions (architecture, voice, data, front end, hosting) are logged in `architecture.md` §13.
+
+## 12. Open questions
 
 None at the moment.

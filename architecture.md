@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.3. Path, voice tier, and test approach decided (§11). Front end for the prototype decided, full app deferred (§10). Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, and the decision log (§13) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -248,11 +248,102 @@ Flutter sits in the same tier as C but uses Dart, so it loses the shared TypeScr
 
 Whichever shell wins, the client keeps the same layers so a swap doesn't touch the logic: a **tour engine** (pure TypeScript state machine and segment queue, no UI), a **position source** (GPS, recorded trace, simulated route), an **audio output** designed as "play this queue of clips, with captions" (browser voice today, server-rendered audio later), **voice input**, an **API client** with event types shared with the server, and a **thin UI**. In the prototype the engine and the page code are still mixed in `public/app.js`; splitting them is planned for later.
 
-## 11. Decisions made
+## 11. Backend hosting
 
-1. **Architecture:** the A → B → C path (§8).
-2. **Voice at launch:** standard neural tier, ~$0.45 per tour hour.
-3. **Geography:** no fixed launch region. Test wherever we are, plus simulated tours anywhere (§9).
-4. **Monetization:** being worked out separately in `monetization.md`.
-5. **Front end, prototype:** stay a mobile web app (§10). It answers the current test questions (commentary quality, timing, cards, steering) with the screen on. Testing with the phone in a pocket needs both server-rendered voice and a native app.
-6. **Front end, full app:** deferred. Leading candidate is React Native with Expo (C); Capacitor (B) and fully native (D) remain open.
+What the backend needs, by stage:
+
+- **Prototype (A, now):** one Node process. Sessions live in memory, responses are long-lived streams (a segment can take 10–60 s), and all data comes from public APIs. The phone needs an HTTPS address.
+- **MVP and later (B, then C):**
+  - the session orchestrator: WebSocket or streaming HTTP, one connection per tour, for an hour or more
+  - Postgres with PostGIS
+  - a routing and map-matching server (Valhalla or OSRM, ~32 GB RAM for Europe)
+  - batch jobs that build fact and area cards
+  - object storage and a CDN for cached audio
+  - auth and purchase webhooks (e.g. RevenueCat)
+
+  Location traces are personal data, so EU hosting and short retention are the safe default.
+
+Two constraints rule some platforms in or out:
+- **Long-lived streams:** platforms with short request time limits (some serverless functions cap requests at 10–60 s) don't fit the orchestrator.
+- **Session state:** in-memory sessions only work on a single instance. Running more than one needs sticky routing, or the state moved to Redis or Postgres.
+
+### Prototype options
+
+| | P1. Laptop + Cloudflare quick tunnel | P2. Laptop + named Cloudflare tunnel | P3. Small PaaS container (Fly.io, Railway, Render) | P4. Serverless / edge (Cloudflare Workers, Vercel, Lambda) |
+|---|---|---|---|---|
+| Cost | $0 | $0 plus a domain (~$10/yr) | ~$5–10/month | $0–5/month |
+| Always reachable | Only while the PC is on and online | Same as P1 | Yes | Yes |
+| Stable address | No: it changes on every restart | Yes | Yes | Yes |
+| Setup | One command | Cloudflare account, a domain, one-time config | Account, Dockerfile or buildpack, secrets | A rewrite: no in-memory sessions, runtime limits |
+| Fit | Testing by one person, with this PC left on | Same as P1, without re-sharing the URL | Testers elsewhere, or the PC is off | Poor at this stage |
+
+Render's free tier sleeps after inactivity, and the first request then waits ~30–60 s. If we choose Render, use a paid instance.
+
+### Production options (MVP onwards)
+
+| | H1. PaaS containers + managed DB | H2. Hyperscaler managed services | H3. Rented servers (VPS / dedicated) | H4. Edge-first (Cloudflare) |
+|---|---|---|---|---|
+| Examples | Orchestrator on Fly.io, Railway or Render. Managed Postgres with PostGIS (Supabase, Neon, or the platform's own). R2 for audio. | AWS (ECS Fargate or App Runner, RDS with PostGIS, S3 + CloudFront) or GCP (Cloud Run, Cloud SQL, GCS) | Hetzner or OVH, deployed with Docker plus Kamal or Coolify | Workers + Durable Objects (one per tour session, holding its WebSocket) + R2 + Hyperdrive to Postgres |
+| Monthly cost at the start (one region) | ~$100–400 | ~$300–1,000 | ~$60–200 | ~$50–150, plus somewhere to run PostGIS and routing |
+| Big-RAM routing server | Expensive on PaaS | Fine, at hyperscaler prices | **Cheapest:** a 64 GB dedicated server is roughly €40–70/month | Not possible here; needs H1–H3 |
+| Operations burden | Low | Medium: many services to wire together | **High:** we patch, back up, and fail over ourselves | Low for the edge part, but the system is split in two |
+| Scaling and regions | Easy multi-region (Fly.io) | Anything, anywhere | Manual. Few regions (EU, some US). | Global by default |
+| Lock-in | Low (containers) | Medium | Lowest | High (Workers runtime, Durable Objects) |
+| Extras | | Startup credit programmes, compliance certifications | | R2 is already the choice for audio |
+
+Firebase-style backends aren't listed: they have no PostGIS for the geo queries. Supabase appears under H1 as a managed Postgres + PostGIS option, not as the whole backend, because the orchestrator still needs a long-running service.
+
+Prices are rough starting figures as of Nov 2026; check the providers' pricing pages before committing.
+
+### Recommendation
+
+- **Prototype:** stay on **P1** (decided).
+  - Move to **P2** if sharing a new address after every restart gets annoying.
+  - Move to **P3** (Fly.io or Railway, one instance, EU region) when someone other than us tests it, or the PC can't stay on. P3 needs a Dockerfile and the secrets set on the platform.
+  - Both moves work with the current code.
+- **MVP and later:** deferred. The leading candidate mixes **H1** and **H3**:
+  - the orchestrator and API in a PaaS container in the EU
+  - managed Postgres with PostGIS
+  - R2 for audio
+  - the RAM-heavy parts (Valhalla/OSRM, the card-building batch jobs) on one rented dedicated server
+
+  Revisit **H2** if startup credits make it effectively free, and **H4** if global latency becomes the bottleneck.
+
+## 12. The prototype as built
+
+The first prototype is a deliberately stripped-down A. These are its choices; several differ from the target design in §2:
+
+| Area | Prototype choice | Alternatives considered | Target design |
+|---|---|---|---|
+| Client platform | Mobile web app, opened from a URL | Expo / React Native app via Expo Go: closer to the product, but slower to change, and desktop simulation is harder | Phone app; shell deferred (§10) |
+| Voice | Browser built-in speech synthesis: free, no key, works straight away | OpenAI gpt-4o-mini-tts (recommended at the time, ~$0.45/hr); Google Cloud TTS Neural2/WaveNet (~$0.45/hr) | Standard neural cloud voice, rendered on the server |
+| Push-to-talk | Browser speech recognition (Web Speech), with a typed fallback | — | On-device OS recogniser, cloud fallback |
+| Hosting | Laptop + Cloudflare quick tunnel | Fly.io or Render container | See §11 |
+| Server runtime | Node 24 running TypeScript directly (no build step), plain `node:http` | A framework (Express, Fastify, Hono) | Open |
+| Transport | NDJSON streamed over HTTP POST, one request per segment | WebSocket | WebSocket or streaming HTTP (§2) |
+| Narration model | Claude Sonnet 5.5 at low effort, grounded in raw Wikipedia/OSM text | Haiku (cheaper; becomes the choice in B, once fact cards exist) | Haiku over fact cards (B) |
+| Places data | Public APIs on demand: Wikipedia geosearch (English + local language), Overpass, Nominatim, cached in memory | Own OSM extract in PostGIS (too slow to set up for a prototype) | Self-hosted geo knowledge base (§3) |
+| Path ahead | Heading and speed from GPS; no map matching | Valhalla / OSRM map matching | Map-matched road ahead (spec UC-2) |
+| Simulated routes | Public FOSSGIS OSRM (foot and car profiles) | Self-hosted OSRM / Valhalla | Self-hosted routing |
+| Map | Leaflet with OSM tiles | MapLibre + vector tiles | Optional, per the spec |
+| Sessions | In memory, lost on restart | Redis / Postgres | Persistent |
+
+## 13. Decision log
+
+| # | Topic | Decision | Alternatives considered | Status |
+|---|---|---|---|---|
+| 1 | Architecture path | A → B → C (§8): live prototype, hybrid fact cards at launch, audio caching in hot spots | A only (too expensive per hour, facts unchecked); B only (no route to an affordable premium voice or offline); C from the start (too complex, less personal) | Decided |
+| 2 | Voice at launch | Standard neural tier, ~$0.45 per tour hour | Basic cloud (~$0.11/hr, may sound cheap); HD (~$0.80/hr); premium expressive (~$1.10–2.70/hr). Premium voice becomes a later paid add-on (`monetization.md`). | Decided |
+| 3 | Geography | No fixed launch region. Test wherever we are, plus simulated tours anywhere (§9). | One test city first; worldwide content pre-built from day one | Decided |
+| 4 | Places data | OSM, Wikidata, Wikipedia, Wikivoyage, Overture/Foursquare open places (§3) | Google Places: $1–3 per tour hour, and caching isn't allowed | Decided |
+| 5 | Planning vs wording | Deterministic planner decides what, when, and for how long; the LLM only writes the words (§2) | Letting the LLM decide timing | Decided |
+| 6 | Speech recognition | On-device by default, cloud fallback for place names (§2) | Cloud only | Decided |
+| 7 | Where the logic runs | Orchestration on the server; the phone does the sensing (§2) | Orchestration on the device (API keys on the phone; logic changes need app releases) | Decided |
+| 8 | Front end, prototype | Mobile web app (§10, §12) | Expo app | Decided |
+| 9 | Front end, full app | Leading candidate: React Native + Expo (§10) | Web app (no GPS or audio with the screen locked); Capacitor; fully native; Flutter | Deferred |
+| 10 | Prototype voice | Browser built-in (§12) | OpenAI TTS; Google Cloud TTS | Decided |
+| 11 | Hosting, prototype | Laptop + Cloudflare quick tunnel (§11) | Named tunnel; PaaS container; serverless | Decided |
+| 12 | Hosting, production | Leading candidate: PaaS + managed Postgres + R2, with routing and batch jobs on a rented server (§11) | Hyperscaler; rented servers only; edge-first | Deferred |
+| 13 | Monetization | One free tour, then hour-based passes and top-ups (`monetization.md`) | Passes only; freemium subscription; ads + paid; pay-as-you-go | Decided |
+
+Product decisions (controls, cards, lenses, languages, scope) are logged in `spec.md` §11.

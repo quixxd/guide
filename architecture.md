@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.2. Path, voice tier, and test approach decided (§10). Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.3. Path, voice tier, and test approach decided (§11). Front end for the prototype decided, full app deferred (§10). Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -230,9 +230,29 @@ The backend doesn't know or care which source is active, so a simulated tour exe
 
 **2. Data coverage has to follow us anywhere from day one.** Since there's no fixed launch city, the prototype can't depend on a pre-loaded regional extract. It fetches data **on demand** from public APIs instead: the Overpass API for OSM POIs, the Wikipedia and Wikidata APIs, and a public routing endpoint for simulation paths. That's fine at prototype volumes and respects their usage policies. As we move to B, we switch to the self-hosted geo knowledge base, loading regions as they're needed or going straight to a planet extract.
 
-## 10. Decisions made
+## 10. Front end
+
+What decides the front end isn't the screens. It's what has to keep working for an hour with the phone in a pocket: location and audio with the screen locked, lock-screen and headset controls, push-to-talk, and later CarPlay / Android Auto, offline packs, and app store purchases. A browser on iPhone can't keep reading location or speaking once the screen locks, and Android browsers stop location too.
+
+| | A. Web app | B. Capacitor (web app in a native shell) | C. React Native + Expo | D. Native (Swift + Kotlin) |
+|---|---|---|---|---|
+| Location and audio with screen locked | No | Yes, via native plugins | Yes | Yes |
+| Lock-screen and headset controls | Unreliable with the browser voice | Yes, via plugin | Yes | Yes |
+| CarPlay / Android Auto | No | Hard (custom native code) | Possible (community library or own module) | Best |
+| Prototype code reused | All | Most screens and logic | Logic; screens rewritten | None |
+| TypeScript shared with server | Yes | Yes | Yes | No |
+| Buying passes | Web checkout | App store billing (e.g. RevenueCat) | Same as B | StoreKit / Play Billing |
+| Effort for iPhone + Android | Lowest | Low | Medium | Highest (two codebases) |
+
+Flutter sits in the same tier as C but uses Dart, so it loses the shared TypeScript.
+
+Whichever shell wins, the client keeps the same layers so a swap doesn't touch the logic: a **tour engine** (pure TypeScript state machine and segment queue, no UI), a **position source** (GPS, recorded trace, simulated route), an **audio output** designed as "play this queue of clips, with captions" (browser voice today, server-rendered audio later), **voice input**, an **API client** with event types shared with the server, and a **thin UI**. In the prototype the engine and the page code are still mixed in `public/app.js`; splitting them is planned for later.
+
+## 11. Decisions made
 
 1. **Architecture:** the A → B → C path (§8).
 2. **Voice at launch:** standard neural tier, ~$0.45 per tour hour.
 3. **Geography:** no fixed launch region. Test wherever we are, plus simulated tours anywhere (§9).
 4. **Monetization:** being worked out separately in `monetization.md`.
+5. **Front end, prototype:** stay a mobile web app (§10). It answers the current test questions (commentary quality, timing, cards, steering) with the screen on. Testing with the phone in a pocket needs both server-rendered voice and a native app.
+6. **Front end, full app:** deferred. Leading candidate is React Native with Expo (C); Capacitor (B) and fully native (D) remain open.

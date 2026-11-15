@@ -19,7 +19,7 @@
 </head>
 <body>
 <h1>Relay test</h1>
-<p class="note">Temporary page. It checks that the PHP relay reaches Claude and streams the reply. The phone prototype replaces it.</p>
+<p class="note">Temporary page. It checks that the PHP relay reaches the LLM and streams the reply. The phone prototype replaces it.</p>
 
 <label for="token">Access token (remembered on this device)</label>
 <input id="token" type="password" autocomplete="off">
@@ -43,7 +43,7 @@
     $("out").textContent = "";
     $("stats").textContent = "Sending…";
     const t0 = performance.now();
-    let first = 0, chunks = 0;
+    let first = 0, chunks = 0, usage = null;
     try {
       const res = await fetch("api/narrate.php", {
         method: "POST",
@@ -65,17 +65,20 @@
           const data = event.split("\n").find((l) => l.startsWith("data: "));
           if (!data) continue;
           const msg = JSON.parse(data.slice(6));
-          if (msg.type === "content_block_delta" && msg.delta?.type === "text_delta") {
+          if (msg.type === "text") {
             if (!first) first = performance.now();
-            $("out").textContent += msg.delta.text;
+            $("out").textContent += msg.text;
           } else if (msg.type === "error") {
-            $("out").textContent += `\n[error] ${msg.error?.message ?? ""}`;
+            $("out").textContent += `\n[error] ${msg.message}`;
+          } else if (msg.type === "done") {
+            usage = msg.usage;
           }
         }
       }
       const total = performance.now();
       $("stats").textContent = `First words after ${((first - t0) / 1000).toFixed(1)} s, done after ${((total - t0) / 1000).toFixed(1)} s, ${chunks} network chunks` +
-        (chunks <= 2 ? " (looks buffered: the reply arrived in one piece)" : " (streamed)");
+        (chunks <= 2 ? " (looks buffered: the reply arrived in one piece)" : " (streamed)") +
+        (usage ? `, tokens in ${usage.in ?? "?"} / out ${usage.out ?? "?"}` : "");
     } catch (error) {
       $("stats").textContent = `Failed: ${error.message}`;
     }

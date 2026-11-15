@@ -30,6 +30,8 @@ npm test                       # node:test, all test/**/*.test.ts
 node --test test/planner.test.ts   # a single test file
 npm run typecheck              # tsc --noEmit
 npm run tunnel                 # cloudflared quick tunnel, for testing on a phone
+npm run deploy                 # upload web/ (phone prototype + PHP relay) to HoboHost over FTPS
+npm run deploy -- --dry        # list what would be uploaded
 ```
 
 `.env` needs `ANTHROPIC_API_KEY`. `ACCESS_TOKEN`, when set, is required on every `/api` call (header `x-access-token`, or `?key=`, which the client stores in localStorage).

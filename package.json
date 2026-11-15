@@ -12,13 +12,15 @@
     "dev": "node --watch --env-file-if-exists=.env server/index.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc",
-    "tunnel": "cloudflared tunnel --url http://localhost:8787"
+    "tunnel": "cloudflared tunnel --url http://localhost:8787",
+    "deploy": "node scripts/deploy.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "basic-ftp": "^6.2.6",
     "typescript": "^7.0.2"
   }
 }

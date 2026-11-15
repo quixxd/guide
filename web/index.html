@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide relay test</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0b6bcb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #eee; --muted: #999; --line: #333; --accent: #5aa9ff; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  p.note { color: var(--muted); margin: 0 0 16px; font-size: .9rem; }
+  label { display: block; font-size: .9rem; margin: 12px 0 4px; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+  button { margin-top: 12px; padding: 12px 18px; font: inherit; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
+  #out { white-space: pre-wrap; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; min-height: 4rem; }
+  #stats { color: var(--muted); font-size: .85rem; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Relay test</h1>
+<p class="note">Temporary page. It checks that the PHP relay reaches Claude and streams the reply. The phone prototype replaces it.</p>
+
+<label for="token">Access token (remembered on this device)</label>
+<input id="token" type="password" autocomplete="off">
+
+<label for="prompt">Prompt</label>
+<textarea id="prompt" rows="3">In three sentences, as a walking tour guide, tell me about the Praça do Comércio in Lisbon.</textarea>
+
+<button id="go">Send</button>
+<div id="out"></div>
+<div id="stats"></div>
+
+<script type="module">
+  const $ = (id) => document.getElementById(id);
+  const store = { get: (k) => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } },
+                  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+  $("token").value = store.get("guide.token");
+
+  $("go").addEventListener("click", async () => {
+    const token = $("token").value.trim();
+    store.set("guide.token", token);
+    $("out").textContent = "";
+    $("stats").textContent = "Sending…";
+    const t0 = performance.now();
+    let first = 0, chunks = 0;
+    try {
+      const res = await fetch("api/narrate.php", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-access-token": token },
+        body: JSON.stringify({ system: "You are a friendly walking tour guide. Plain spoken English, no markdown.",
+                               messages: [{ role: "user", content: $("prompt").value }] }),
+      });
+      if (!res.ok || !res.body) { $("stats").textContent = `Error ${res.status}: ${await res.text()}`; return; }
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        chunks++;
+        buffer += value;
+        let i;
+        while ((i = buffer.indexOf("\n\n")) >= 0) {
+          const event = buffer.slice(0, i); buffer = buffer.slice(i + 2);
+          const data = event.split("\n").find((l) => l.startsWith("data: "));
+          if (!data) continue;
+          const msg = JSON.parse(data.slice(6));
+          if (msg.type === "content_block_delta" && msg.delta?.type === "text_delta") {
+            if (!first) first = performance.now();
+            $("out").textContent += msg.delta.text;
+          } else if (msg.type === "error") {
+            $("out").textContent += `\n[error] ${msg.error?.message ?? ""}`;
+          }
+        }
+      }
+      const total = performance.now();
+      $("stats").textContent = `First words after ${((first - t0) / 1000).toFixed(1)} s, done after ${((total - t0) / 1000).toFixed(1)} s, ${chunks} network chunks` +
+        (chunks <= 2 ? " (looks buffered: the reply arrived in one piece)" : " (streamed)");
+    } catch (error) {
+      $("stats").textContent = `Failed: ${error.message}`;
+    }
+  });
+</script>
+</body>
+</html>

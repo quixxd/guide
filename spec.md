@@ -300,6 +300,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 - **More languages:** narration and push-to-talk beyond English.
 - **More lenses**, e.g. *Military History*, *Science & Engineering*, *Transport*.
 - **Planned routes and destination input.**
+- **Ask mode inside AI assistants:** the guide's knowledge available as an app in ChatGPT, Claude, or Gemini for questions and trip planning. It answers when asked but doesn't tour hands-free; it points people to the full app for that (`architecture.md` §10).
 - **Local news as filler:** when nothing nearby has a story, the guide can share a light item from the local news ("the town is getting ready for its summer festival this weekend"). Upbeat and relevant to visitors, never crime or tragedy, and always attributed to the outlet.
 - **Speaker recognition:** tailoring to different listeners in the same car.
 
@@ -314,7 +315,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 | Driving | No taps needed once the tour starts; passengers do the steering (UC-9) | Requiring taps while driving |
 | Lenses | The 13 in §5, *Surprise me* by default. Tone and depth ("for the kids", "in depth") are set by voice, not as lenses. | *Military History*, *Science & Engineering*, *Transport* (Roadmap); tone and depth as lenses |
 | Language | English only, for narration and push-to-talk | Several languages at launch (Roadmap) |
-| Platform | Phone only | Desktop or car screens at launch (CarPlay / Android Auto on the Roadmap) |
+| Platform | Phone only, as our own app | Desktop or car screens at launch (CarPlay / Android Auto on the Roadmap); running inside ChatGPT or another AI assistant (no continuous location or unprompted speech, so Ask mode only, on the Roadmap) |
 | Kind of tour | Spontaneous only, starting where you are; the path is inferred from position and direction | Planned tours, destination or route input (out of scope for now, Roadmap) |
 | Restaurants and cafés | Brief mentions as places along the way | Reviews, bookings, opening hours (out of scope) |
 | Losing the connection | Finish what's already loaded, say so, and pause (UC-13) | Offline commentary (Roadmap) |

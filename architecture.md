@@ -252,6 +252,22 @@ Flutter sits in the same tier as C but uses Dart, so it loses the shared TypeScr
 
 Whichever shell wins, the client keeps the same layers so a swap doesn't touch the logic: a **tour engine** (pure TypeScript state machine and segment queue, no UI), a **position source** (GPS, recorded trace, simulated route), an **audio output** designed as "play this queue of clips, with captions" (browser voice today, server-rendered audio later), **voice input**, an **API client** with event types shared with the server, and a **thin UI**. In the prototype the engine and the page code are still mixed in `public/app.js`; splitting them is planned for later.
 
+### Alternative considered: running inside an AI assistant (ChatGPT app, Claude connector, Gemini)
+
+The idea: build the guide as an app inside ChatGPT (OpenAI's Apps SDK), or as a connector for Claude or Gemini, with all generation live and tied to the user's assistant account. Our server would offer tools such as `whats_around(lat, lon, heading)`, `tell_me_about(place)`, and `the_road_ahead`, returning grounded facts. The assistant's model would write the words and its voice mode would speak them. Findings as of Nov 2026, mostly from third-party and developer-forum reports, so to re-check before acting:
+
+| | Works | Breaks or unclear |
+|---|---|---|
+| Cost | Generation and voice run on the user's assistant account. Our LLM and TTS costs drop to ~zero. | — |
+| Voice | ChatGPT's voice can keep running in the background and shows on the iPhone lock screen | Unclear whether voice mode calls app tools: developers report it doesn't, while OpenAI's help page says Live voice can use connected apps |
+| Position | — | **No continuous GPS feed to apps.** ChatGPT's own location sharing is an optional setting for search. The workaround, a companion app posting GPS to our server, is a native background app anyway. |
+| Proactive narration | — | **The assistant only speaks when spoken to.** Scheduled tasks run at most hourly and reportedly exclude voice chats. No pace-aware narration: it becomes ask-and-answer ("what's this?", "continue"). |
+| Control and quality | Our tools still supply grounded sources | The assistant's model decides what to say and for how long, so our planner, word budgets, and "only from sources" rule become requests, not guarantees. No button-first controls, topic cards, or headset semantics of our own. We can't pick the model. |
+| Accounts and distribution | Account linking via OAuth; listing in the assistant's app directory | Ranking and policy controlled by the platform; apps were reportedly renamed "plugins" in July 2026 |
+| Payments | External checkout on our own site is allowed | As of early 2026, ChatGPT apps couldn't sell digital goods or subscriptions in-app, so passes would be sold outside |
+
+**Verdict:** not viable as the main product. Hands-free, pace-aware touring needs continuous GPS, unprompted speech, and our planner owning the timing, and none of those are available inside an assistant. **Worth doing later as a secondary channel ("Ask mode"):** questions while standing or sitting somewhere, trip planning, and discovery for the full app. It reuses the B-stage data layer (fact cards, the fallback ladder in §16), exposed as an MCP tool server, so little of the work is extra.
+
 ## 11. Backend hosting
 
 What the backend needs, by stage:
@@ -564,6 +580,7 @@ Many buildings have no article but do have tags or register entries: constructio
 | 7 | Where the logic runs | Orchestration on the server; the phone does the sensing (§2) | Orchestration on the device (API keys on the phone; logic changes need app releases) | Decided |
 | 8 | Front end, prototype | Mobile web app (§10, §12) | Expo app | Decided |
 | 9 | Front end, full app | Leading candidate: React Native + Expo (§10) | Web app (no GPS or audio with the screen locked); Capacitor; fully native; Flutter | Deferred |
+| 9a | Running inside an AI assistant (ChatGPT app, Claude connector, Gemini) as the product | Rejected as the main product: no continuous GPS, no unprompted speech, no control over timing or grounding (§10). Kept for later as a secondary "Ask mode" channel built on the B data layer as an MCP tool server. | Companion GPS app + assistant (still needs a native app); ask-and-answer only | Rejected (main product); later (secondary channel) |
 | 10 | Prototype voice | Browser built-in (§12) | OpenAI TTS; Google Cloud TTS | Decided |
 | 11 | Hosting, prototype | Laptop + Cloudflare quick tunnel (§11) | Named tunnel; PaaS container; serverless | Decided |
 | 12 | Hosting, production | Leading candidate: PaaS + managed Postgres + R2, with routing and batch jobs on a rented server (§11) | Hyperscaler; rented servers only; edge-first | Deferred |

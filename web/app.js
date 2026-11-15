@@ -32,6 +32,11 @@ const SIM_PRESETS = {
   chiado: { name: "Lisbon: Bairro Alto to Chiado", points: [[38.7155, -9.1443], [38.7106, -9.1426]] },
   porto: { name: "Porto: Ribeira to Clérigos", points: [[41.1406, -8.6131], [41.1457, -8.6146]] },
   evora: { name: "Évora: Roman Temple to Praça do Giraldo", points: [[38.5728, -7.9073], [38.5711, -7.9093]] },
+  // Domshof → Marktplatz (town hall, Roland) → Böttcherstraße → Schlachte on the Weser → Schnoor.
+  bremen: {
+    name: "Bremen: Marktplatz to the Schnoor",
+    points: [[53.0767, 8.8093], [53.0757, 8.807], [53.0746, 8.8058], [53.0737, 8.8043], [53.0727, 8.8117]],
+  },
 };
 
 function simSpec() {

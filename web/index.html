@@ -3,110 +3,193 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Guide relay test</title>
+<title>Guide</title>
 <style>
-  :root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #0b6bcb; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #eee; --muted: #999; --line: #333; --accent: #5aa9ff; } }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; }
-  h1 { font-size: 1.25rem; margin: 0 0 4px; }
-  p.note { color: var(--muted); margin: 0 0 16px; font-size: .9rem; }
-  label { display: block; font-size: .9rem; margin: 12px 0 4px; }
-  input, textarea { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
-  select { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; }
-  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
-  button { margin-top: 12px; padding: 12px 18px; font: inherit; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
-  #out { white-space: pre-wrap; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; min-height: 4rem; }
-  #stats { color: var(--muted); font-size: .85rem; margin-top: 8px; }
+  :root { color-scheme: light dark; --bg: #faf9f7; --fg: #1c1b19; --muted: #6b6862; --accent: #0b6bcb; --accent-fg: #fff; --busy: #8a6d1f; --err: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #ececec; --muted: #9a978f; --accent: #4f9cf0; --accent-fg: #08111c; --busy: #d9b44a; --err: #f2766d; } }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, -apple-system, sans-serif;
+         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 24px 16px; text-align: center; }
+  #speak { width: 180px; height: 180px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg);
+           font: 600 1.5rem/1 system-ui, sans-serif; letter-spacing: .02em; box-shadow: 0 6px 24px rgb(0 0 0 / .18); touch-action: manipulation; }
+  #speak:active { transform: scale(.97); }
+  #speak.busy { background: var(--busy); }
+  #status { color: var(--muted); min-height: 1.5em; margin: 0; }
+  #status.err { color: var(--err); }
+  #place { font-weight: 600; margin: 0; min-height: 1.5em; }
+  #text { max-width: 34rem; margin: 0; color: var(--fg); opacity: .85; }
 </style>
 </head>
 <body>
-<h1>Relay test</h1>
-<p class="note">Temporary page. It checks that the PHP relay reaches the LLM, streams the reply, and reads it aloud sentence by sentence with the browser's voice. The phone prototype replaces it.</p>
-
-<label for="token">Access token (remembered on this device)</label>
-<input id="token" type="password" autocomplete="off">
-
-<label for="prompt">Prompt</label>
-<textarea id="prompt" rows="3">In three sentences, as a walking tour guide, tell me about the Praça do Comércio in Lisbon.</textarea>
-
-<label for="voice">Voice</label>
-<select id="voice"></select>
-
-<button id="go">Send</button>
-<button id="stop" class="secondary">Stop speaking</button>
-<div id="out"></div>
-<div id="stats"></div>
+<button id="speak" type="button">Speak</button>
+<p id="status">Tap to hear about where you are.</p>
+<p id="place"></p>
+<p id="text"></p>
 
 <script type="module">
   import { SentenceBuffer, Speaker } from "./speech.js";
-  const $ = (id) => document.getElementById(id);
-  const speaker = new Speaker();
-  function fillVoices() {
-    const voices = speaker.voices();
-    $("voice").innerHTML = "";
-    if (!speaker.supported || voices.length === 0) {
-      $("voice").append(new Option(speaker.supported ? "Default voice" : "Speech not supported in this browser", ""));
-      return;
-    }
-    for (const v of voices) $("voice").append(new Option(`${v.name} (${v.lang})`, v.voiceURI, false, v === speaker.voice));
-  }
-  fillVoices();
-  if (speaker.supported) speechSynthesis.addEventListener?.("voiceschanged", fillVoices);
-  $("voice").addEventListener("change", () => speaker.setVoice($("voice").value));
-  $("stop").addEventListener("click", () => speaker.cancel());
-  const store = { get: (k) => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } },
-                  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
-  $("token").value = store.get("guide.token");
 
-  $("go").addEventListener("click", async () => {
-    const token = $("token").value.trim();
-    store.set("guide.token", token);
-    speaker.cancel();
-    speaker.unlock(); // inside the tap, so mobile browsers allow speech
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  // The access token comes from the address (?key=...) and is remembered on this device.
+  const urlKey = new URLSearchParams(location.search).get("key");
+  if (urlKey) store.set("guide.token", urlKey);
+  const token = urlKey || store.get("guide.token");
+
+  const IDLE = "Tap to hear about where you are.";
+  const speaker = new Speaker();
+  let busy = false;
+
+  function status(message, isError = false) {
+    $("status").textContent = message;
+    $("status").classList.toggle("err", isError);
+  }
+
+  function setButton(label, isBusy = false) {
+    $("speak").textContent = label;
+    $("speak").classList.toggle("busy", isBusy);
+  }
+
+  speaker.onIdle = () => {
+    if (busy) return;
+    setButton("Speak");
+    if (!$("status").classList.contains("err")) status(IDLE);
+  };
+
+  function getPosition() {
+    return new Promise((resolve, reject) => {
+      if (!("geolocation" in navigator)) return reject(new Error("This browser has no location access."));
+      navigator.geolocation.getCurrentPosition(resolve, (e) => {
+        reject(new Error(e.code === 1 ? "Location permission was refused." : "Couldn't get your location."));
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+    });
+  }
+
+  /** Street, district and town from OpenStreetMap's Nominatim (one request per tap). */
+  async function reverseGeocode(lat, lon) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${lat}&lon=${lon}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Address lookup failed (${res.status}).`);
+    const a = (await res.json()).address ?? {};
+    return {
+      street: a.road || a.pedestrian || a.footway || a.square || a.path || "",
+      landmark: a.tourism || a.historic || a.amenity || a.building || "",
+      district: a.neighbourhood || a.quarter || a.suburb || a.city_district || "",
+      town: a.city || a.town || a.village || a.municipality || "",
+      region: a.state || a.county || "",
+      country: a.country || "",
+    };
+  }
+
+  /** Nearby Wikipedia articles with their opening sentences, as grounding for the guide. */
+  async function nearbyArticles(lat, lon) {
+    const api = "https://en.wikipedia.org/w/api.php?format=json&origin=*";
+    const geo = await fetch(`${api}&action=query&list=geosearch&gscoord=${lat}|${lon}&gsradius=400&gslimit=5`).then((r) => r.json());
+    const hits = geo.query?.geosearch ?? [];
+    if (hits.length === 0) return [];
+    const ids = hits.map((h) => h.pageid).join("|");
+    const ex = await fetch(`${api}&action=query&prop=extracts&exintro=1&explaintext=1&exsentences=4&pageids=${ids}`).then((r) => r.json());
+    return hits
+      .map((h) => ({ title: h.title, distance: Math.round(h.dist), text: ex.query?.pages?.[h.pageid]?.extract?.trim() ?? "" }))
+      .filter((a) => a.text);
+  }
+
+  const SYSTEM = `You are a warm, knowledgeable local walking tour guide speaking into the listener's earphones.
+Reply with exactly three sentences of plain spoken English: no lists, no markdown, no headings.
+Talk about where the listener is: the street first, then what's around it, the district, or the town, whichever has the most interesting story.
+Use facts from the SOURCES block, or facts about the named place that are widely known. Never invent details: if little is known about the street, talk about the district or town instead.
+Don't mention coordinates, sources, Wikipedia, or that you are an AI. Don't greet or say goodbye.`;
+
+  function buildPrompt(place, articles, accuracy) {
+    const where = [
+      place.street && `Street: ${place.street}`,
+      place.landmark && `At or next to: ${place.landmark}`,
+      place.district && `District: ${place.district}`,
+      place.town && `Town: ${place.town}`,
+      place.region && `Region: ${place.region}`,
+      place.country && `Country: ${place.country}`,
+    ].filter(Boolean).join("\n");
+    const sources = articles.length
+      ? articles.map((a) => `## ${a.title} (${a.distance} m away)\n${a.text}`).join("\n\n")
+      : "(no nearby articles found)";
+    return `The listener is standing here (location accurate to about ${Math.round(accuracy)} m):\n${where}\n\nSOURCES\n${sources}`;
+  }
+
+  /** Sends the prompt through the relay and speaks each sentence as it arrives. */
+  async function narrate(prompt) {
+    const res = await fetch("api/narrate.php", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-access-token": token },
+      body: JSON.stringify({ system: SYSTEM, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok || !res.body) {
+      let message = String(res.status);
+      try { message = (await res.json()).error ?? message; } catch {}
+      throw new Error(res.status === 401 ? "Wrong or missing key in the address (?key=...)." : `The guide couldn't answer: ${message}`);
+    }
     const sentences = new SentenceBuffer();
-    $("out").textContent = "";
-    $("stats").textContent = "Sending…";
-    const t0 = performance.now();
-    let first = 0, chunks = 0, usage = null;
-    try {
-      const res = await fetch("api/narrate.php", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-access-token": token },
-        body: JSON.stringify({ system: "You are a friendly walking tour guide. Plain spoken English, no markdown.",
-                               messages: [{ role: "user", content: $("prompt").value }] }),
-      });
-      if (!res.ok || !res.body) { $("stats").textContent = `Error ${res.status}: ${await res.text()}`; return; }
-      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-      let buffer = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        chunks++;
-        buffer += value;
-        let i;
-        while ((i = buffer.indexOf("\n\n")) >= 0) {
-          const event = buffer.slice(0, i); buffer = buffer.slice(i + 2);
-          const data = event.split("\n").find((l) => l.startsWith("data: "));
-          if (!data) continue;
-          const msg = JSON.parse(data.slice(6));
-          if (msg.type === "text") {
-            if (!first) first = performance.now();
-            $("out").textContent += msg.text;
-            for (const sentence of sentences.push(msg.text)) speaker.enqueue(sentence);
-          } else if (msg.type === "error") {
-            $("out").textContent += `\n[error] ${msg.message}`;
-          } else if (msg.type === "done") {
-            usage = msg.usage;
-          }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    $("text").textContent = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let i;
+      while ((i = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.slice(0, i).split("\n").find((l) => l.startsWith("data: "));
+        buffer = buffer.slice(i + 2);
+        if (!line) continue;
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === "text") {
+          $("text").textContent += msg.text;
+          for (const s of sentences.push(msg.text)) speaker.enqueue(s);
+        } else if (msg.type === "error") {
+          throw new Error(`The guide stopped: ${msg.message}`);
         }
       }
-      for (const sentence of sentences.flush()) speaker.enqueue(sentence);
-      const total = performance.now();
-      $("stats").textContent = `First words after ${((first - t0) / 1000).toFixed(1)} s, done after ${((total - t0) / 1000).toFixed(1)} s, ${chunks} network chunks` +
-        (chunks <= 2 ? " (looks buffered: the reply arrived in one piece)" : " (streamed)") +
-        (usage ? `, tokens in ${usage.in ?? "?"} / out ${usage.out ?? "?"}` : "");
+    }
+    for (const s of sentences.flush()) speaker.enqueue(s);
+  }
+
+  $("speak").addEventListener("click", async () => {
+    if (busy) return;
+    if (speaker.busy) {
+      speaker.cancel();
+      setButton("Speak");
+      status(IDLE);
+      return;
+    }
+    if (!token) {
+      status("Add your key to the address: …/guide/?key=YOUR_KEY", true);
+      return;
+    }
+    speaker.unlock(); // inside the tap, so mobile browsers allow speech
+    busy = true;
+    try {
+      setButton("Locating…", true);
+      status("Finding your position…");
+      const { latitude: lat, longitude: lon, accuracy } = (await getPosition()).coords;
+
+      setButton("Looking…", true);
+      status("Looking up the street and what's nearby…");
+      const [place, articles] = await Promise.all([reverseGeocode(lat, lon), nearbyArticles(lat, lon).catch(() => [])]);
+      $("place").textContent = [place.street, place.district, place.town].filter(Boolean).join(", ") || "Somewhere without a name";
+
+      setButton("Thinking…", true);
+      status("Asking the guide…");
+      await narrate(buildPrompt(place, articles, accuracy));
+      status(speaker.busy ? "Tap to stop." : IDLE);
     } catch (error) {
-      $("stats").textContent = `Failed: ${error.message}`;
+      status(error.message, true);
+    } finally {
+      busy = false;
+      setButton(speaker.busy ? "Stop" : "Speak");
     }
   });
 </script>

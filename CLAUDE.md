@@ -36,7 +36,16 @@ npm run deploy -- --dry        # list what would be uploaded
 
 `.env` needs `ANTHROPIC_API_KEY` for the Node server. The phone prototype's relay uses `LLM_PROVIDER` (default `gemini`) with `GEMINI_API_KEY` and `GEMINI_MODEL`, or `anthropic` with `ANTHROPIC_API_KEY`; `npm run deploy` writes them into the relay config. `ACCESS_TOKEN`, when set, is required on every `/api` call (header `x-access-token`, or `?key=`, which the client stores in localStorage).
 
-## Architecture (current code: the rev1 prototype, still a Node server; rev2 moves it onto the phone)
+## Architecture: phone prototype (`web/`, deployed to https://chattyjoe.com/guide)
+
+Plain ES modules with JSDoc types, no build step, checked by `tsc -p tsconfig.web.json`. Everything runs in the browser except the LLM call. Open as `…/guide/?key=ACCESS_TOKEN`; `&sim=baixa` (or `&sim=lat,lon;lat,lon`) walks a simulated route, `&speed=3` speeds it up, `&debug=1` shows the planner's view.
+- `app.js`: walk mode. Start / Pause / Skip / Stop, Leaflet map (position, heading, places, simulated route), wake lock. Loop: prepare a segment, stream it, speak sentence by sentence; when the last sentence of a complete segment starts, the next segment is prepared (`state.next`) so there's no long gap. Places are marked covered when their segment starts playing; spoken text is remembered once complete.
+- `tour.js`: `Session` (covered places, announced, areas, recent texts) and `prepareSegment()` (reverse geocode → places → `planner.js` → sources → prompt). Pure planning stays in `planner.js` (unit-tested in `test/web/`).
+- `pois.js`, `sources.js`: Wikipedia (en + local language), Overpass (4 s wait, 2-minute back-off), Nominatim (1 request/s), OSRM foot routes, all called directly from the page with an in-memory cache.
+- `narrator.js`: prompts (grounded in SOURCES, word budget from the plan). `relay.js`: client for `api/narrate.php`, which streams one provider-neutral event stream (`text`, `done`, `error`) and reports `X-Guide-Calls` (used/limit today).
+- `geo.js`, `lenses.js`, `position.js`, `speech.js`: ported from the rev1 code below.
+
+## Architecture: rev1 prototype (Node server + `public/`, to be removed once nothing depends on it)
 
 **Client (`public/`, plain ES modules, no bundler):** a mobile web page. `position.js` holds the two interchangeable position sources (`GpsSource` smooths raw GPS into speed and heading; `SimSource` moves along an OSRM route, with bus stops and a speed multiplier). Both emit the same `{lat, lon, heading, speed}`, so the server can't tell real from simulated. `speech.js` handles output (browser `speechSynthesis`, one sentence per utterance, with a watchdog) and push-to-talk input (Web Speech recognition). `app.js` runs the tour state machine: `waiting → fetching → speaking → waiting`, plus `paused`, `listening` and `answering`. It requests the next segment only once the previous one has finished speaking, so commentary fits the listener's position at that moment.
 

@@ -94,7 +94,10 @@ function listFiles(dir: string): string[] {
 }
 
 const localRoot = "web";
-const files = listFiles(localRoot).map((path) => relative(localRoot, path).split("\\").join("/"));
+// Type declarations are for the type checker only; the site doesn't need them.
+const files = listFiles(localRoot)
+  .map((path) => relative(localRoot, path).split("\\").join("/"))
+  .filter((file) => !file.endsWith(".d.ts"));
 
 console.log(`deploy: ${files.length} files from ${localRoot}/ + api/_private/config.php → ${host}:/${remoteRoot}/`);
 console.log(`deploy: ${provider} ${model}, API key ${apiKey ? "set" : "NOT set (the relay will answer 503)"}`);

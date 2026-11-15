@@ -54,13 +54,15 @@ flock($fh, LOCK_EX);
 $calls = (int) stream_get_contents($fh);
 if ($calls >= $config['daily_calls']) {
     flock($fh, LOCK_UN);
-    fail(429, 'daily call limit reached');
+    header('X-Guide-Calls: ' . $calls . '/' . $config['daily_calls']);
+    fail(429, "the relay's daily call limit is reached");
 }
 ftruncate($fh, 0);
 rewind($fh);
 fwrite($fh, (string) ($calls + 1));
 flock($fh, LOCK_UN);
 fclose($fh);
+header('X-Guide-Calls: ' . ($calls + 1) . '/' . $config['daily_calls']);
 
 if ($provider === 'gemini') {
     $generation = ['maxOutputTokens' => $config['max_tokens']];

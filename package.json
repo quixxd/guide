@@ -10,8 +10,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.ts",
     "dev": "node --watch --env-file-if-exists=.env server/index.ts",
-    "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc",
+    "test": "node --test \"test/**/*.test.ts\" \"test/**/*.test.js\"",
+    "typecheck": "tsc && tsc -p tsconfig.web.json",
     "tunnel": "cloudflared tunnel --url http://localhost:8787",
     "deploy": "node scripts/deploy.ts"
   },

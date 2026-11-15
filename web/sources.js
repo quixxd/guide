@@ -12,7 +12,7 @@ const DAY = 24 * 3600 * 1000;
  * Memoise an async load by key. Concurrent callers share one request; failures aren't cached.
  * @template T @param {string} key @param {() => Promise<T>} load @returns {Promise<T>}
  */
-function cached(key, load, ttlMs = DAY) {
+export function cached(key, load, ttlMs = DAY) {
   const hit = cache.get(key);
   if (hit && hit.expires > Date.now()) return hit.promise;
   const promise = load();
@@ -22,7 +22,7 @@ function cached(key, load, ttlMs = DAY) {
   return promise;
 }
 
-async function fetchJson(url, init = {}, timeoutMs = 20000) {
+export async function fetchJson(url, init = {}, timeoutMs = 20000) {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`${res.status} from ${new URL(url).host}`);
   return res.json();
@@ -52,7 +52,7 @@ function throttle(gapMs) {
  */
 
 // Nominatim's usage policy allows at most one request per second.
-const nominatim = throttle(1100);
+export const nominatim = throttle(1100);
 
 /** @returns {Promise<Place>} */
 export function reverseGeocode(lat, lon) {
@@ -184,31 +184,35 @@ function overpassQuery(lat, lon, radius) {
   return `[out:json][timeout:25];\n(\n${lines.join("\n")}\n);\nout center tags 300;`;
 }
 
+/**
+ * Runs an Overpass query, trying each public endpoint in turn. After all fail, Overpass is
+ * left alone for a couple of minutes. @returns {Promise<any[]>} the raw elements
+ */
+export async function overpass(query, timeoutMs = 20000) {
+  if (Date.now() - overpassFailedAt < OVERPASS_BACKOFF_MS) throw new Error("Overpass recently unavailable");
+  for (const endpoint of OVERPASS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      return (await res.json()).elements ?? [];
+    } catch {
+      // try the next endpoint
+    }
+  }
+  overpassFailedAt = Date.now();
+  throw new Error("All Overpass endpoints failed");
+}
+
 /** Named sights, heritage, places of worship and parks around a point. @returns {Promise<OsmElement[]>} */
 export function osmAround(lat, lon, radiusM) {
   const radius = Math.round(radiusM);
   return cached(`osm:${lat.toFixed(4)},${lon.toFixed(4)}:${radius}`, async () => {
-    if (Date.now() - overpassFailedAt < OVERPASS_BACKOFF_MS) throw new Error("Overpass recently unavailable");
-    let raw = null;
-    for (const endpoint of OVERPASS) {
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: `data=${encodeURIComponent(overpassQuery(lat, lon, radius))}`,
-          signal: AbortSignal.timeout(20000),
-        });
-        if (!res.ok) throw new Error(String(res.status));
-        raw = (await res.json()).elements ?? [];
-        break;
-      } catch {
-        // try the next endpoint
-      }
-    }
-    if (raw === null) {
-      overpassFailedAt = Date.now();
-      throw new Error("All Overpass endpoints failed");
-    }
+    const raw = await overpass(overpassQuery(lat, lon, radius));
     /** @type {OsmElement[]} */
     const out = [];
     for (const el of raw) {

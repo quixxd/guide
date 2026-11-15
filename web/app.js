@@ -7,6 +7,7 @@
 // Address options: ?key=TOKEN (remembered), ?sim=baixa or ?sim=lat,lon;lat,lon (simulated walk),
 // &speed=2 (simulation speed), &debug=1 (planner details).
 
+import { placeOutline, placePhoto } from "./details.js";
 import { GpsSource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
 import { walkingRoute } from "./sources.js";
@@ -131,6 +132,12 @@ async function run(seg) {
     if (seg.ctl.signal.aborted) return;
     seg.prepared = prepared;
     showPrepared(prepared);
+    const target = targetOf(prepared.plan);
+    if (target) {
+      // Look up the outline and photo now, so they're ready when this segment starts playing.
+      placeOutline(target).catch(() => null);
+      placePhoto(target).catch(() => null);
+    }
     if (prepared.plan.kind === "silence") {
       seg.silence = true;
       seg.retryMs = prepared.plan.retryMs;
@@ -157,9 +164,15 @@ function record(seg) {
   seg.recorded = true;
   state.session.record(seg.prepared);
   const plan = seg.prepared.plan;
-  const target = "target" in plan && plan.target ? plan.target.poi.name : plan.kind === "area" ? plan.areaName : "";
-  status(target ? `Talking about ${target}` : "Speaking");
+  const target = targetOf(plan);
+  status(target ? `Talking about ${target.name}` : plan.kind === "area" ? `Talking about ${plan.areaName}` : "Speaking");
   refreshPois();
+  showTarget(target);
+}
+
+/** The place a plan is about, if any. @param {import("./planner.js").Plan} plan */
+function targetOf(plan) {
+  return "target" in plan && plan.target ? plan.target.poi : null;
 }
 
 /** Makes a prefetched segment the one being spoken. @param {Segment} seg */
@@ -312,6 +325,7 @@ function stop() {
   state.wakeLock?.release().catch(() => {});
   state.wakeLock = null;
   $("caption").textContent = "";
+  showTarget(null);
   status("Tap Start and walk. The guide talks about what's around you.");
   renderControls();
 }
@@ -356,10 +370,12 @@ function updateMeta() {
 // ---------- Map ----------
 
 const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(SIM ? SIM.points[0] : [38.7115, -9.1365], 17);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+// Satellite imagery. Esri's terms expect an ArcGIS account beyond development use; fine for the prototype.
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 19,
-  attribution: "&copy; OpenStreetMap contributors",
+  attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics | Places &copy; OpenStreetMap contributors, Wikipedia",
 }).addTo(map);
+const outlineLayer = L.layerGroup().addTo(map);
 const poiLayer = L.layerGroup().addTo(map);
 let meMarker = null;
 let headingLine = null;
@@ -422,6 +438,53 @@ function refreshPois() {
       .addTo(poiLayer);
   }
 }
+
+// ---------- The place being talked about: outline and photo ----------
+
+let shownTargetId = null;
+
+/** Outlines the place on the map and shows its photo card; clears both when there's no place. */
+async function showTarget(poi) {
+  const id = poi?.id ?? null;
+  if (id === shownTargetId) return;
+  shownTargetId = id;
+  outlineLayer.clearLayers();
+  $("now").hidden = true;
+  if (!poi) return;
+
+  $("now-name").textContent = poi.name;
+  $("now-photo").hidden = true;
+  $("now-credit").textContent = "";
+  $("now").hidden = false;
+
+  const [shapes, photo] = await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)]);
+  if (shownTargetId !== id) return; // moved on while looking up
+  for (const shape of shapes ?? []) {
+    if (shape.kind === "polygon") {
+      L.polygon(shape.coords, { color: "#ffd23f", weight: 3, fillColor: "#ffd23f", fillOpacity: 0.18 }).addTo(outlineLayer);
+    } else {
+      L.polyline(shape.coords, { color: "#ffd23f", weight: 6, opacity: 0.85 }).addTo(outlineLayer);
+    }
+  }
+  if (photo) {
+    const img = /** @type {HTMLImageElement} */ ($("now-photo"));
+    img.onload = () => { if (shownTargetId === id) img.hidden = false; };
+    img.src = photo.url;
+    img.alt = poi.name;
+    const credit = /** @type {HTMLAnchorElement} */ ($("now-credit"));
+    credit.textContent = `Photo: ${photo.credit}`;
+    credit.href = photo.link;
+  }
+}
+
+$("now").addEventListener("click", (e) => {
+  if (/** @type {HTMLElement} */ (e.target).closest("a")) return;
+  const plan = state.current?.prepared?.plan;
+  const poi = plan ? targetOf(plan) : null;
+  if (!poi) return;
+  followUntil = Date.now() + 20000;
+  map.setView([poi.lat, poi.lon], Math.max(map.getZoom(), 18));
+});
 
 // ---------- Debug ----------
 

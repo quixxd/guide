@@ -71,6 +71,7 @@ function fromWiki(p) {
     notability: 0,
     wiki: { lang: p.lang, title: p.title, extract: p.extract, length: p.length },
     wikidata: p.wikidata,
+    altNames: [],
   };
 }
 
@@ -85,6 +86,7 @@ function fromOsm(e) {
     notability: 0,
     wikidata: e.tags.wikidata,
     tags: e.tags,
+    altNames: [],
   };
 }
 
@@ -98,6 +100,7 @@ export function mergePois(wikiPages, osm) {
   for (const page of sorted) {
     const poi = fromWiki(page);
     const existing = byId.get(poi.id);
+    if (existing && poi.name !== existing.name) existing.altNames.push(poi.name); // e.g. the German article title
     if (!existing) byId.set(poi.id, poi);
     else if (existing.wiki && existing.wiki.extract.length < 80 && page.extract.length > existing.wiki.extract.length) {
       existing.wiki = poi.wiki; // English stub, richer local article
@@ -113,6 +116,7 @@ export function mergePois(wikiPages, osm) {
       match.tags = { ...osmPoi.tags, ...match.tags };
       match.categories = [...new Set([...match.categories, ...osmPoi.categories])];
       if (!match.wiki) match.name = osmPoi.name;
+      for (const n of [osmPoi.tags.name, osmPoi.name]) if (n && n !== match.name && !match.altNames.includes(n)) match.altNames.push(n);
     } else if (![...byId.values()].some(sameName)) {
       byId.set(osmPoi.id, osmPoi);
     }

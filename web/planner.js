@@ -11,7 +11,7 @@ import { lensFit } from "./lenses.js";
 /**
  * @typedef {{ id: string, name: string, lat: number, lon: number, categories: string[], notability: number,
  *   wiki?: { lang: string, title: string, extract: string, length: number }, wikidata?: string,
- *   tags?: Record<string, string> }} Poi
+ *   tags?: Record<string, string>, altNames?: string[] }} Poi
  */
 /** @typedef {Relative & { poi: Poi, eta: number | null, passDistance: number | null, score: number }} Candidate */
 /**

@@ -43,6 +43,7 @@ Plain ES modules with JSDoc types, no build step, checked by `tsc -p tsconfig.we
 - `tour.js`: `Session` (covered places, announced, areas, recent texts) and `prepareSegment()` (reverse geocode → places → `planner.js` → sources → prompt). Pure planning stays in `planner.js` (unit-tested in `test/web/`).
 - `pois.js`, `sources.js`: Wikipedia (en + local language), Overpass (4 s wait, 2-minute back-off), Nominatim (1 request/s), OSRM foot routes, all called directly from the page with an in-memory cache.
 - `narrator.js`: prompts (grounded in SOURCES, word budget from the plan). `relay.js`: client for `api/narrate.php`, which streams one provider-neutral event stream (`text`, `done`, `error`) and reports `X-Guide-Calls` (used/limit today).
+- `details.js`: for the place being talked about, its shape (Nominatim name search within ~400 m, trying English, local-language and OSM names; Overpass as fallback) and a photo (Wikipedia lead image, else Wikidata P18). Looked up when a segment is prepared, shown when it starts playing; never blocks narration. Map tiles are Esri World Imagery (satellite).
 - `geo.js`, `lenses.js`, `position.js`, `speech.js`: ported from the rev1 code below.
 
 ## Architecture: rev1 prototype (Node server + `public/`, to be removed once nothing depends on it)

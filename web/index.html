@@ -12,6 +12,8 @@
   p.note { color: var(--muted); margin: 0 0 16px; font-size: .9rem; }
   label { display: block; font-size: .9rem; margin: 12px 0 4px; }
   input, textarea { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+  select { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   button { margin-top: 12px; padding: 12px 18px; font: inherit; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
   #out { white-space: pre-wrap; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; min-height: 4rem; }
   #stats { color: var(--muted); font-size: .85rem; margin-top: 8px; }
@@ -19,7 +21,7 @@
 </head>
 <body>
 <h1>Relay test</h1>
-<p class="note">Temporary page. It checks that the PHP relay reaches the LLM and streams the reply. The phone prototype replaces it.</p>
+<p class="note">Temporary page. It checks that the PHP relay reaches the LLM, streams the reply, and reads it aloud sentence by sentence with the browser's voice. The phone prototype replaces it.</p>
 
 <label for="token">Access token (remembered on this device)</label>
 <input id="token" type="password" autocomplete="off">
@@ -27,12 +29,31 @@
 <label for="prompt">Prompt</label>
 <textarea id="prompt" rows="3">In three sentences, as a walking tour guide, tell me about the Praça do Comércio in Lisbon.</textarea>
 
+<label for="voice">Voice</label>
+<select id="voice"></select>
+
 <button id="go">Send</button>
+<button id="stop" class="secondary">Stop speaking</button>
 <div id="out"></div>
 <div id="stats"></div>
 
 <script type="module">
+  import { SentenceBuffer, Speaker } from "./speech.js";
   const $ = (id) => document.getElementById(id);
+  const speaker = new Speaker();
+  function fillVoices() {
+    const voices = speaker.voices();
+    $("voice").innerHTML = "";
+    if (!speaker.supported || voices.length === 0) {
+      $("voice").append(new Option(speaker.supported ? "Default voice" : "Speech not supported in this browser", ""));
+      return;
+    }
+    for (const v of voices) $("voice").append(new Option(`${v.name} (${v.lang})`, v.voiceURI, false, v === speaker.voice));
+  }
+  fillVoices();
+  if (speaker.supported) speechSynthesis.addEventListener?.("voiceschanged", fillVoices);
+  $("voice").addEventListener("change", () => speaker.setVoice($("voice").value));
+  $("stop").addEventListener("click", () => speaker.cancel());
   const store = { get: (k) => { try { return localStorage.getItem(k) ?? ""; } catch { return ""; } },
                   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
   $("token").value = store.get("guide.token");
@@ -40,6 +61,9 @@
   $("go").addEventListener("click", async () => {
     const token = $("token").value.trim();
     store.set("guide.token", token);
+    speaker.cancel();
+    speaker.unlock(); // inside the tap, so mobile browsers allow speech
+    const sentences = new SentenceBuffer();
     $("out").textContent = "";
     $("stats").textContent = "Sending…";
     const t0 = performance.now();
@@ -68,6 +92,7 @@
           if (msg.type === "text") {
             if (!first) first = performance.now();
             $("out").textContent += msg.text;
+            for (const sentence of sentences.push(msg.text)) speaker.enqueue(sentence);
           } else if (msg.type === "error") {
             $("out").textContent += `\n[error] ${msg.message}`;
           } else if (msg.type === "done") {
@@ -75,6 +100,7 @@
           }
         }
       }
+      for (const sentence of sentences.flush()) speaker.enqueue(sentence);
       const total = performance.now();
       $("stats").textContent = `First words after ${((first - t0) / 1000).toFixed(1)} s, done after ${((total - t0) / 1000).toFixed(1)} s, ${chunks} network chunks` +
         (chunks <= 2 ? " (looks buffered: the reply arrived in one piece)" : " (streamed)") +

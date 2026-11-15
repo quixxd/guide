@@ -1,0 +1,210 @@
+# Audio Tour Guide: Architecture, revision 2
+
+Status: rev2 draft v0.1, 2026-11-15. Current architecture. Builds on `spec.md` (rev2). Rev1 (`../rev1/architecture.md`) holds the earlier option analysis; sections that still apply are referenced rather than copied. Prices are rough, as of Nov 2026.
+
+## 1. Summary
+
+- **Prototype:** almost everything runs on the phone, in the web page. A single PHP file on our existing HoboHost shared hosting keeps the Claude API key off the phone and relays requests. HoboHost also serves the page. No laptop, no tunnel, no Node server to keep running.
+- **Rollout:** no LLM at run time. An offline **content pipeline** turns sources into reviewed scripts and recorded audio per route. **Delivery is static files** (catalog, route packs, audio) on object storage behind a CDN. The **phone app** follows your position along the route and plays the right chapter. The backend shrinks to static hosting plus a few small functions (purchases, download links).
+- **What carries over from rev1:** the data sources and licence rules, the fallback ladder (now used when writing stretch chapters), the market mapping, the "code decides what and how long, the LLM writes the words" rule (now applied in the pipeline), and simulated walks for testing.
+
+## 2. Prototype
+
+### 2.1 Shape
+
+```
+┌──────────────── Phone: web page (static files from HoboHost) ─────────────────┐
+│ Position: GPS or simulated walk                                               │
+│ Places: Wikipedia geosearch, Overpass, Nominatim  ──── direct from the phone   │
+│ Planner: what to talk about, for how long (pure code, ported from the server) │
+│ Prompts: built on the phone                                                   │
+│ Voice: browser speech synthesis                                               │
+│ Session memory: in the page (what's been said, places covered)                │
+└───────────────┬───────────────────────────────────────────────────────────────┘
+                │ POST prompt  ◄── streamed text
+┌───────────────▼──────────── HoboHost (PHP, HTTPS) ──┐        ┌──────────────┐
+│ api/narrate.php                                     │ ─────► │ Claude API   │
+│  checks the access password, fixes model and limits │ ◄───── │              │
+│  key in a config file outside the web folder        │        └──────────────┘
+└─────────────────────────────────────────────────────┘
+```
+
+### 2.2 What runs where
+
+| Job | Where | Notes |
+|---|---|---|
+| Position (GPS, simulated walk) | Phone | `position.js`, as now |
+| Places and facts | Phone → public APIs | Wikipedia, Overpass, and Nominatim all allow calls from web pages (CORS). Calls come from the user's own IP, so rate limits are per phone. Keep the 1 request/second throttle for Nominatim; browsers send a Referer, which its policy accepts for light use. Cache results in memory and `localStorage`. |
+| Planner, fallback ladder | Phone | `server/planner.ts` is pure code with no I/O, so it moves as is. |
+| Prompts and parsing | Phone | From `server/narrator.ts` and `parsers.ts`. Keeping prompts on the phone means prompt changes don't touch the PHP. |
+| Session memory | Phone | In memory, with `localStorage` so a page reload doesn't lose the walk |
+| LLM call | Phone → PHP relay → Claude | The only server-side step |
+| Voice | Phone | Browser speech synthesis, as now |
+
+### 2.3 The PHP relay
+
+One file, `api/narrate.php`, about 50 lines:
+
+1. Check the access password (header `x-access-token`), as `ACCESS_TOKEN` does today.
+2. Accept a JSON body with the system prompt and messages. Reject bodies over a size limit (e.g. 64 KB).
+3. **Force** the model (Claude Sonnet 5.5, rev1 decision 16 still applies) and a cap on output length. The phone can't change them.
+4. Count calls per day in a small file and refuse past a daily limit. Also set a spending limit on the Anthropic key itself.
+5. Call the Claude API with PHP's curl, with streaming on, and pass the streamed events straight through to the phone as they arrive (`CURLOPT_WRITEFUNCTION` writing and flushing each chunk). The phone parses the event stream.
+
+The key and the access password live in `config.php` **outside `public_html`**, never in the repo.
+
+**To check on the first deploy:**
+- **Buffering.** LiteSpeed or PHP output buffering may hold the stream until the reply is complete. Turn off output buffering and compression for this script and send `Content-Type: text/event-stream`, `Cache-Control: no-cache`, and `X-Accel-Buffering: no`. If it still arrives in one piece, speech starts after the whole segment is written (about 5–10 s instead of 1–2 s). That's usable for a prototype; the fallback below fixes it.
+- **Time limit.** Shared hosts usually allow PHP 30–60 s per request. A segment takes 10–20 s.
+- **Outbound HTTPS** to `api.anthropic.com` must be allowed. Shared hosts normally allow it.
+
+**Fallback if PHP streaming doesn't work:** the same relay as a Cloudflare Worker (free tier, streams well, key stored as a Worker secret), with the page still on HoboHost.
+
+### 2.4 Code and deployment
+
+- **No build step.** The phone code stays plain ES modules. The parts that move from `server/` (planner, geometry, lenses, prompts, parsers, place gathering) become `.js` files with JSDoc types, type-checked by `tsc` (`checkJs`), and unit-tested with `node:test` as now.
+- **Layout:** `web/` holds what's deployed (page, scripts, `api/narrate.php`); tests stay in `test/`.
+- **Deploy:** cPanel's Git Version Control pulls from the GitHub repo, and a `.cpanel.yml` copies `web/` into `public_html/guide/`. A push to GitHub, then one click (or a pull) in cPanel, deploys. If cPanel's Git deploy turns out to be unavailable, use FTP from a small script.
+- **HTTPS** from HoboHost's free AutoSSL certificate. Needed for GPS in the browser.
+- **The Node server** (`server/`) stays until the phone version does everything it does, then it's deleted along with the tunnel scripts.
+
+### 2.5 Cost
+
+- Hosting: the HoboHost plan already paid for.
+- LLM: Sonnet 5.5 writing from raw sources, about $1 per hour of walking (rev1 §14). A daily cap in the relay and a spending limit on the key bound it.
+- Voice: free (browser).
+
+### 2.6 Hosting options considered
+
+| Option | Verdict |
+|---|---|
+| **PHP relay on HoboHost, page on HoboHost** | **Chosen.** Already paid for, HTTPS included, key stays on the server, nothing on the laptop. |
+| Page on GitHub Pages, key on the phone | Works, but the key sits in the phone's browser storage, and the public repo makes the page easy to find. |
+| Laptop + Cloudflare tunnel (rev1 prototype) | Needs the laptop on and the server running; the address changes on each restart. |
+| PaaS container (Fly.io, Railway) running the Node server | Costs ~$5–10/month and keeps logic on a server we no longer need. |
+| Cloudflare Worker as the relay | Good streaming, free. The fallback if PHP streaming is buffered. |
+| Node or Python on HoboHost | Not listed on HoboHost's site; check cPanel for "Setup Node.js App" or "Setup Python App". Not needed: the relay is too small to matter. |
+
+## 3. Rollout
+
+### 3.1 Shape
+
+```
+                 OFFLINE, per route                                   RUN TIME, per listener
+┌──────────────────── Content pipeline ────────────────────┐      ┌───────────── Phone app ─────────────┐
+│ 1 Choose city and route (market-areas, geo data)         │      │ Catalog and route packs (offline)   │
+│ 2 Path and timings (routing engine, foot)                │      │ GPS → progress along the route      │
+│ 3 Gather sources per stop, stretch, digression           │      │ Chapter trigger rules (spec R-4..6) │
+│ 4 LLM writes the script to time budgets                  │      │ Audio player: sentence-level pause, │
+│ 5 Automatic fact check against sources                   │      │   digression, resume                │
+│ 6 Human review and editing                               │      │ Map with offline tiles              │
+│ 7 Record audio (TTS) with sentence timings               │      │ Lock screen and headset controls    │
+│ 8 Package and publish a versioned route pack             │      └───────────────▲─────────────────────┘
+└───────────────────────────────┬──────────────────────────┘                      │ download
+                                ▼                                                 │
+                 ┌──────── Object storage + CDN (e.g. Cloudflare R2) ─────────────┘
+                 │ catalog.json, route packs, audio, map tiles
+                 └── small functions: purchase webhooks, signed download links (later)
+```
+
+No orchestrator, no sessions on a server, no live voice, no geo database queried at run time.
+
+### 3.2 Route pack
+
+One route, one lens, one language, one version. A route pack is a folder (or zip) holding:
+
+| Part | Contents |
+|---|---|
+| `route.json` | Id, city, lens, language, version, title, description, duration, distance, start point |
+| Path | The route line (encoded polyline) with distance along the route for each point |
+| Stops | Name, position, distance along the route, arrival radius, card text, photo credit |
+| Chapters | Kind (intro, stop, stretch, outro), trigger (arrival at a stop, or a range of distance along the route), audio file, duration, transcript, **sentence start times** |
+| Digressions | Place name and position, the stretch of route where its button shows, audio, duration, transcript, sentence times |
+| Shared cues | "Back to our route", "You've left the route…", "Welcome back", recorded in the route's voice |
+| Map | Offline map tiles for the route area (a small PMTiles extract) |
+| Sources | The sources and credits for the route (spec R-9) |
+
+Sentence start times let the player pause at a sentence end and resume from the start of that sentence (spec R-5, R-6). TTS services return word or sentence timings, or they can be computed when the audio is recorded.
+
+### 3.3 Content pipeline
+
+| Step | What happens | Tools |
+|---|---|---|
+| 1. Route choice | Pick cities from `../rev1/market-areas.md`. Design routes from notable places (Wikidata, Wikipedia page views, heritage registers) and how walkable the area is. A person decides the final stops and order. | Geo data, a small planning tool, a person |
+| 2. Path and timings | Compute the walking path through the stops, its length, and walking time per stretch at ~4 km/h | Routing engine on OSM (OSRM or Valhalla, foot profile) |
+| 3. Sources | Gather grounded material per stop, stretch, and digression. Stretch chapters use the rev1 fallback ladder (street → quarter → town, `../rev1/architecture.md` §16) and aggregates of building data. | Sources and licences from `../rev1/data-sources.md` |
+| 4. Script | A strong model writes each chapter to its time budget: a stretch chapter fits the walking time of its stretch, minus gaps; stop chapters fit a typical stop (2–4 minutes). Directions are written in. One voice and style per route. | Claude (batch, 50% off) or whichever model wins the eval (rev1 §14) |
+| 5. Fact check | Every claim must trace back to the sources; a second model pass flags anything that doesn't | LLM check |
+| 6. Review | A person reads, edits, and approves each chapter, and listens to a draft recording | A simple review page |
+| 7. Recording | Render each chapter with a premium voice, with timings | TTS service (rev1 §4 tiers) |
+| 8. Publish | Build the route pack, upload a new version, update the catalog | Script + object storage |
+
+The pipeline reuses the prototype's prompts and source handling, which is the main reason to build the live prototype first.
+
+**Cost per route (one language):** a 90-minute route plus digressions is about 60 minutes of speech, ≈ 9,000 words ≈ 54,000 characters.
+- Script and fact check: well under $5 with a strong model in batch.
+- Voice: ~$2–5 at premium rates ($40–100 per million characters), so a premium voice is affordable.
+- Review: a few hours of a person's time. **This is the main cost**, and it scales with routes × languages.
+
+### 3.4 Phone app
+
+- **Following the route:** match each GPS fix to the route line to get **distance along the route** and **distance off the route**. Search only near the last known progress, so routes that cross themselves or double back don't jump. Smooth GPS noise; require a few consistent fixes before declaring arrival or leaving the route.
+- **Trigger rules:** implement spec R-4 to R-6 as a pure, unit-tested state machine (as the rev1 planner is): progress and time in, "play / pause / skip / resume" out. Simulated walks drive it for testing.
+- **Audio:** a queue of recorded clips with a digression stack. Pause at sentence ends using the stored times. Lock-screen and headset controls through the platform media session.
+- **Screen off, in a pocket:** needs background location and background audio, which web pages don't get (rev1 §10). So the rollout is a **real app**. Rev1's leading candidate, **React Native + Expo**, fits: TypeScript, background location and audio through maintained libraries, app store purchases through RevenueCat.
+- **Map:** MapLibre with the route pack's offline tiles.
+- **Storage on the phone:** downloaded packs as files plus a small index; progress per route.
+
+### 3.5 Backend
+
+Mostly static:
+- **Object storage + CDN** (Cloudflare R2 was rev1's pick: free egress) for the catalog, packs, audio, and tiles.
+- **Purchases:** RevenueCat as the record, once pricing is decided (spec §7).
+- **Signed download links** for paid packs: one small function (e.g. a Cloudflare Worker) that checks entitlement and returns a time-limited link. Not needed while routes are free.
+- **Analytics:** product events (routes started, finished, digressions tapped, chapters skipped), e.g. PostHog EU. No location traces stored by default.
+
+Rev1's Postgres-centric design (§15) shrinks to the pipeline: the content database (places, sources, scripts, review status) lives wherever the pipeline runs. There's no app database until accounts are needed.
+
+### 3.6 Running cost
+
+Per listener: only bandwidth. A route pack with 60 minutes of speech at 48 kbps is ~25 MB of audio, plus tiles. On R2 that's effectively free. Fixed costs are a few dollars a month until volume grows. The cost of the product is the content: making, checking, and recording routes.
+
+## 4. What rev1 work still applies
+
+| Rev1 piece | In rev2 |
+|---|---|
+| Data sources, licence rules (`data-sources.md`) | Pipeline step 3. **Share-alike needs legal review before launch**: published scripts are fixed texts, so whether they count as adaptations of CC BY-SA sources matters more than for live narration. |
+| Fallback ladder (§16) | Writing stretch chapters (pipeline step 3–4) |
+| Planner rule: code decides what and how long, the LLM writes the words (§2) | Pipeline step 4: time budgets per chapter come from the path and walking speed |
+| LLM provider comparison (§14) | Choosing the pipeline model; batch pricing applies |
+| Voice tiers (§4) | Pipeline step 7; premium is now affordable |
+| Front end comparison (§10) | Rollout app: Expo leading |
+| Simulated tours (§9) | Testing the prototype and the rollout trigger rules |
+| Market mapping (`market-areas.md`) | Choosing cities and routes |
+| A → B → C, orchestrator, sessions, live TTS, listening-hours ledger (§5–8, §11, §15) | Dropped |
+
+## 5. Decision log
+
+| # | Topic | Decision | Alternatives considered | Status |
+|---|---|---|---|---|
+| A2-1 | Prototype: where logic runs | On the phone: position, places, planner, prompts, voice, session memory. Only the LLM call goes through a server. | The Node server orchestrating everything (rev1 decision 7) | Decided |
+| A2-2 | Prototype: hosting | Page and a PHP relay on HoboHost shared hosting (§2.6) | GitHub Pages with the key on the phone; laptop + tunnel (rev1); PaaS container; Cloudflare Worker (fallback) | Decided |
+| A2-3 | Prototype: relay limits | Access password, fixed model and output cap, request size cap, daily call limit, spending limit on the key | An open relay; the phone choosing the model | Decided |
+| A2-4 | Prototype: code | Plain ES modules with JSDoc types, checked by `tsc`, no build step; server code ported to `web/`; Node server removed once the phone version matches it | A build step (esbuild) to keep TypeScript files; keeping the Node server | Decided |
+| A2-5 | Prototype: deploy | cPanel Git Version Control + `.cpanel.yml`; FTP as fallback | Manual uploads | To verify on HoboHost |
+| A2-6 | Rollout: run time | No LLM, no live voice, no orchestrator. Pre-made route packs served as static files. | Rev1 A, B, C | Decided |
+| A2-7 | Rollout: content | Pipeline: route choice → path → sources → script → fact check → human review → recording → publish (§3.3) | Publishing without human review; live generation with caching | Decided |
+| A2-8 | Rollout: voice | Premium TTS, recorded once per chapter | Standard neural (rev1 launch choice); human voice actors (better, far costlier per language) | Leading candidate |
+| A2-9 | Rollout: app | Native app for background location and audio; React Native + Expo leading (rev1 §10) | Web app (no screen-off use); Capacitor; fully native; Flutter | Leading candidate |
+| A2-10 | Rollout: backend | Object storage + CDN, RevenueCat, one small function for signed links when packs are paid | Rev1's Postgres-centric backend with an orchestrator | Leading candidate |
+| A2-11 | Rollout: following the route | Match GPS to the route line; progress-based trigger state machine, unit-tested, driven by simulated walks in tests (§3.4) | Geofences around each chapter only (fragile where routes cross themselves) | Leading candidate |
+
+Rev1 decisions that still hold: 2 (voice tiers as reference), 3 (testing anywhere, simulated tours), 4 and 4a (data sources), 5 (planning vs wording, now in the pipeline), 16 (LLM provider open, Sonnet 5.5 as the prototype default), 19 (fallback ladder, now in the pipeline), 20 (Europe first). Rev1 decisions 1, 7, 11, 12, 13, 17, and 18 are replaced by the table above and by spec §8.
+
+## 6. Open questions
+
+1. Does HoboHost stream PHP output without buffering? (Check on first deploy.)
+2. Is cPanel's Git deploy available on our plan?
+3. Which TTS voice for the rollout, and does it return timings?
+4. Where the pipeline runs (laptop at first, then a small server) and what its review page looks like.
+5. Pricing (spec §7), which decides whether signed links and accounts are needed at launch.

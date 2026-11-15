@@ -1,6 +1,6 @@
 # Tour Guide (prototype)
 
-A personal audio tour guide for walks and drives. Open it on your phone, pick what interests you, and it talks you through the place as you move. Product spec: `spec/rev1/spec.md`. Architecture and costs: `spec/rev1/architecture.md`.
+A personal audio tour guide for walks and drives. Open it on your phone, pick what interests you, and it talks you through the place as you move. Product spec: `spec/rev2/spec.md`. Architecture: `spec/rev2/architecture.md`. Earlier revision: `spec/rev1/`.
 
 This is the first prototype (architecture "A": everything generated live). It's a mobile web app: the phone's browser handles GPS, the voice (built-in speech synthesis) and push-to-talk (built-in speech recognition). A small Node server finds nearby places (Wikipedia, OpenStreetMap), decides what to talk about and when, and has Claude write the commentary.
 

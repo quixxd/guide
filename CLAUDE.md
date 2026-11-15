@@ -6,17 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An app that acts as a personal audio tour guide for walks and drives.
 
-`spec.md` holds the agreed product spec: use cases, user scenarios, scope, and roadmap. Treat it as the source of truth for product behaviour, and update it when decisions change.
+The spec documents live in `spec/rev1/` (revision 1).
 
-`architecture.md` compares the backend, data source, and cost options, and records the decisions: start with live generation (A), move to shared fact cards with live narration (B), then add pre-rendered audio caching (C). Standard neural voice at launch. There is no fixed launch region: testing happens wherever we are and in simulated tours, so position must come from a swappable source (real GPS, recorded trace, or simulated route). It also covers front-end, hosting, language, LLM provider, and data storage options (decided for the prototype, open for the full app), what the prototype actually uses, and a decision log with the rejected alternatives (§17). Product decisions are logged in `spec.md` §11. When a decision is made or changed, record it there, alternatives included.
+`spec/rev1/spec.md` holds the agreed product spec: use cases, user scenarios, scope, and roadmap. Treat it as the source of truth for product behaviour, and update it when decisions change.
 
-`data-sources.md` surveys the content sources beyond the Wikipedia/Wikidata/OSM backbone: streets, buildings, roads, scenery, country-specific registers (Portugal first), and which licences we can use.
+`spec/rev1/architecture.md` compares the backend, data source, and cost options, and records the decisions: start with live generation (A), move to shared fact cards with live narration (B), then add pre-rendered audio caching (C). Standard neural voice at launch. There is no fixed launch region: testing happens wherever we are and in simulated tours, so position must come from a swappable source (real GPS, recorded trace, or simulated route). It also covers front-end, hosting, language, LLM provider, and data storage options (decided for the prototype, open for the full app), what the prototype actually uses, and a decision log with the rejected alternatives (§17). Product decisions are logged in `spec/rev1/spec.md` §11. When a decision is made or changed, record it there, alternatives included.
 
-`market-areas.md` maps where to invest in Europe: a scoring model (demand, existing coverage, fit, data readiness), a rough first list of most-visited and sweet-spot areas, and the ongoing research and crawling approach.
+`spec/rev1/data-sources.md` surveys the content sources beyond the Wikipedia/Wikidata/OSM backbone: streets, buildings, roads, scenery, country-specific registers (Portugal first), and which licences we can use.
 
-`topics-later.md` lists important aspects not yet discussed (test plan, guide persona, segment gaps, safety and legal, competition, cost controls, and more). When one is settled, record it in the relevant doc and remove it there.
+`spec/rev1/market-areas.md` maps where to invest in Europe: a scoring model (demand, existing coverage, fit, data readiness), a rough first list of most-visited and sweet-spot areas, and the ongoing research and crawling approach.
 
-`monetization.md` records the launch model: one free tour, then day, week, and annual passes that each include a set number of listening hours, plus top-ups. There are no unlimited plans or ads at launch, prices are regional, and remaining time is not shown on screen.
+`spec/rev1/topics-later.md` lists important aspects not yet discussed (test plan, guide persona, segment gaps, safety and legal, competition, cost controls, and more). When one is settled, record it in the relevant doc and remove it there.
+
+`spec/rev1/monetization.md` records the launch model: one free tour, then day, week, and annual passes that each include a set number of listening hours, plus top-ups. There are no unlimited plans or ads at launch, prices are regional, and remaining time is not shown on screen.
 
 ## Workflow
 
@@ -43,7 +45,7 @@ npm run tunnel                 # cloudflared quick tunnel, for testing on a phon
 
 **Server (`server/`, plain `node:http`):** the endpoints stream NDJSON events (`debug`, `pois`, `card`, `text`, `cards`, `silence`, `error`, `done`).
 - `tour.ts` orchestrates one segment: reverse geocode → `pois.ts` gathers places → `planner.ts` decides → sources fetched → `narrator.ts` streams Claude → session updated.
-- `planner.ts` is the core rule from architecture.md: deterministic code decides **what** to talk about and **for how long**, and the LLM only writes the words. It is pure (no I/O) and unit-tested. Mode comes from speed (`stationary`/`walking`/`vehicle_slow`/`vehicle_fast`), and each mode has a profile (horizon, "near" radius, visibility, segment length limits). It ranks candidates by notability + lens fit + proximity, computes the ETA and closest-approach distance from heading and speed, and picks focus > orientation > now > approaching/look-ahead > deeper > area > silence. The time budget becomes a word budget at 2.6 words/sec.
+- `planner.ts` is the core rule from `spec/rev1/architecture.md`: deterministic code decides **what** to talk about and **for how long**, and the LLM only writes the words. It is pure (no I/O) and unit-tested. Mode comes from speed (`stationary`/`walking`/`vehicle_slow`/`vehicle_fast`), and each mode has a profile (horizon, "near" radius, visibility, segment length limits). It ranks candidates by notability + lens fit + proximity, computes the ETA and closest-approach distance from heading and speed, and picks focus > orientation > now > approaching/look-ahead > deeper > area > silence. The time budget becomes a word budget at 2.6 words/sec.
 - `pois.ts` merges Wikipedia geosearch (English plus the local-language wiki) with OpenStreetMap features from Overpass. Queries snap to a grid so a moving listener reuses cached tiles. Overpass is often overloaded, so it gets 4 s before narration goes ahead on Wikipedia alone, and a failure triggers a 2-minute back-off.
 - `narrator.ts` holds the prompts. Narration must be grounded in the SOURCES block and end with a `CARDS: a | b` line, which `parsers.ts` strips from the spoken stream. Push-to-talk replies start with an `INTENT: question | steer | control` line. Steering notes are kept per session and fed into later prompts.
 - `session.ts` holds sessions in memory: covered POIs, look-ahead announcements, areas covered, recent segments (fed back to avoid repetition), and steering notes. A restart loses them.

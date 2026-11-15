@@ -40,6 +40,8 @@ Design rules that hold for every option:
 
 ## 3. Data sources
 
+The backbone sources are below. `data-sources.md` goes further: sources for streets, individual buildings, drive roads, and scenery, country-specific sources (Portugal first), and licence rules.
+
 | Need | Source | License / terms | Cost | Notes |
 |---|---|---|---|---|
 | POIs, roads, paths, geometry | **OpenStreetMap** (own extract in PostGIS) | ODbL: attribution required. Derived databases we publish must stay ODbL, but narration we produce from it is fine. | Free data, self-hosted | The backbone. Planet ~80 GB, Europe ~30 GB. |
@@ -490,6 +492,7 @@ Revisit if: the full app goes edge-first (§11 H4), which pulls sessions toward 
 | 2 | Voice at launch | Standard neural tier, ~$0.45 per tour hour | Basic cloud (~$0.11/hr, may sound cheap); HD (~$0.80/hr); premium expressive (~$1.10–2.70/hr). Premium voice becomes a later paid add-on (`monetization.md`). | Decided |
 | 3 | Geography | No fixed launch region. Test wherever we are, plus simulated tours anywhere (§9). | One test city first; worldwide content pre-built from day one | Decided |
 | 4 | Places data | OSM, Wikidata, Wikipedia, Wikivoyage, Overture/Foursquare open places (§3) | Google Places: $1–3 per tour hour, and caching isn't allowed | Decided |
+| 4a | Data sources beyond the backbone | Open. Recommended order: Wikidata facts, OSM street etymology, scenery features, and Wikivoyage first; then green-licensed national registers, land cover, terrain, and Itiner-e per country (`data-sources.md` §7) | Red-licensed sources (SIPA without permission, HMdb, WDPA, Gallica commercial); Atlas Obscura, Tripadvisor, guidebook publishers (licensing deals, later) | Open |
 | 5 | Planning vs wording | Deterministic planner decides what, when, and for how long; the LLM only writes the words (§2) | Letting the LLM decide timing | Decided |
 | 6 | Speech recognition | On-device by default, cloud fallback for place names (§2) | Cloud only | Decided |
 | 7 | Where the logic runs | Orchestration on the server; the phone does the sensing (§2) | Orchestration on the device (API keys on the phone; logic changes need app releases) | Decided |

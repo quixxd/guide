@@ -10,6 +10,8 @@ An app that acts as a personal audio tour guide for walks and drives.
 
 `architecture.md` compares the backend, data source, and cost options, and records the decisions: start with live generation (A), move to shared fact cards with live narration (B), then add pre-rendered audio caching (C). Standard neural voice at launch. There is no fixed launch region: testing happens wherever we are and in simulated tours, so position must come from a swappable source (real GPS, recorded trace, or simulated route). It also covers front-end, hosting, language, LLM provider, and data storage options (decided for the prototype, open for the full app), what the prototype actually uses, and a decision log with the rejected alternatives (§16). Product decisions are logged in `spec.md` §11. When a decision is made or changed, record it there, alternatives included.
 
+`data-sources.md` surveys the content sources beyond the Wikipedia/Wikidata/OSM backbone: streets, buildings, roads, scenery, country-specific registers (Portugal first), and which licences we can use.
+
 `monetization.md` records the launch model: one free tour, then day, week, and annual passes that each include a set number of listening hours, plus top-ups. There are no unlimited plans or ads at launch, prices are regional, and remaining time is not shown on screen.
 
 ## Workflow

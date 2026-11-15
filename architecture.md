@@ -547,6 +547,7 @@ Many buildings have no article but do have tags or register entries: constructio
 
 - **Prototype (A):** L0 as now. L1 from Nominatim's road name plus OSM etymology and street Wikidata/Wikipedia tags. L3–L6 from Nominatim's address parts plus Wikipedia search by name. Chapters by lens. No aggregates yet.
 - **B:** street cards (L1), area cards per admin unit with chapters (L2–L5), aggregates computed in the pipeline, terrain visibility and road history for D0–D2.
+- **Later: local news as a filler chapter.** A *local news* chapter at town level (L4 / D3), offered when the ladder has nothing else unused and before the preview and silence rungs. At most one item per town per tour, cached per town per day. Filters: no crime, accidents, or tragedy; no named private individuals; visitor-relevant items first (festivals, openings, works, local achievements). Short summaries in our own words, with the outlet named. Sources in `data-sources.md` §3 (Current information).
 - **C:** higher-rung chapters are the most reusable content there is: every listener in a quarter hears the same area chapters. That makes them the first candidates for pre-rendered audio.
 
 ## 17. Decision log

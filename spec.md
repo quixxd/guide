@@ -300,6 +300,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 - **More languages:** narration and push-to-talk beyond English.
 - **More lenses**, e.g. *Military History*, *Science & Engineering*, *Transport*.
 - **Planned routes and destination input.**
+- **Local news as filler:** when nothing nearby has a story, the guide can share a light item from the local news ("the town is getting ready for its summer festival this weekend"). Upbeat and relevant to visitors, never crime or tragedy, and always attributed to the outlet.
 - **Speaker recognition:** tailoring to different listeners in the same car.
 
 ## 11. Decisions and alternatives considered

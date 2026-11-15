@@ -105,6 +105,7 @@ National registers describe individual protected buildings and sites with author
 - **LLM web search tools** (`architecture.md` §14): news, events, what a place is like now. Cache per city per day.
 - **City open data portals:** events, works, closures, where published.
 - **Wikivoyage:** slower-changing "today" material.
+- **Local news (later, as a filler chapter, `architecture.md` §16):** LLM web search scoped to the town; local outlets' RSS feeds; municipal press releases and event calendars; GDELT (open global news-event index) for discovery. News text is copyrighted: summarise briefly in our own words, name the outlet, never read articles out. Filter out crime, accidents, tragedy, and named private individuals.
 
 ### Commercial and restricted sources
 

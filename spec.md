@@ -297,7 +297,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 - **Offline mode:** prepared commentary for areas without coverage (rural drives, abroad without roaming).
 - **Car integration:** CarPlay / Android Auto.
 - **Hands-free voice:** a wake word, or push-to-talk from a headset or steering-wheel button.
-- **More languages:** narration and push-to-talk beyond English.
+- **More languages:** narration and push-to-talk beyond English. Draft order by tourist demand: German, French, Spanish, Italian, then Portuguese (Brazil), Mandarin, and Japanese (`market-areas.md` §4).
 - **More lenses**, e.g. *Military History*, *Science & Engineering*, *Transport*.
 - **Planned routes and destination input.**
 - **Ask mode inside AI assistants:** the guide's knowledge available as an app in ChatGPT, Claude, or Gemini for questions and trip planning. It answers when asked but doesn't tour hands-free; it points people to the full app for that (`architecture.md` §10).

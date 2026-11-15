@@ -12,6 +12,8 @@ An app that acts as a personal audio tour guide for walks and drives.
 
 `data-sources.md` surveys the content sources beyond the Wikipedia/Wikidata/OSM backbone: streets, buildings, roads, scenery, country-specific registers (Portugal first), and which licences we can use.
 
+`market-areas.md` maps where to invest in Europe: a scoring model (demand, existing coverage, fit, data readiness), a rough first list of most-visited and sweet-spot areas, and the ongoing research and crawling approach.
+
 `topics-later.md` lists important aspects not yet discussed (test plan, guide persona, segment gaps, safety and legal, competition, cost controls, and more). When one is settled, record it in the relevant doc and remove it there.
 
 `monetization.md` records the launch model: one free tour, then day, week, and annual passes that each include a set number of listening hours, plus top-ups. There are no unlimited plans or ads at launch, prices are regional, and remaining time is not shown on screen.

@@ -173,6 +173,8 @@ When the user is the driver:
 
 ### UC-10: Handle places with little to say
 
+When the place right in front of the user has nothing on record, the guide moves to the next broader thing: from the building to the street, then the quarter, the neighbourhood, the town, the region. By car it moves from a landmark to the road, then the landscape, the town being passed, the region. It drops back to the specific as soon as something nearby has a story (`architecture.md` §16).
+
 In sparse areas (empty motorway, forest, open sea, farmland), the app:
 - Widens the scope: landscape, geology, climate, agriculture, the region as a whole, history that played out across the area.
 - Previews the next interesting place and how far away it is.
@@ -318,7 +320,7 @@ They hop off at St Paul's. The app notices they're walking now, and switches to 
 | Different listeners | Treated as one audience | Speaker recognition (Roadmap) |
 | Free use and payment | One free tour, then hour-based passes; remaining time not shown, with a spoken heads-up instead (UC-15, `monetization.md`) | Showing remaining time (to decide later); ads; unlimited plans |
 
-Technical decisions (architecture, voice, data, front end, hosting, languages, LLM provider, data storage) are logged in `architecture.md` §16.
+Technical decisions (architecture, voice, data, front end, hosting, languages, LLM provider, data storage) are logged in `architecture.md` §17.
 
 ## 12. Open questions
 

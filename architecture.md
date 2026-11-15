@@ -1,6 +1,6 @@
 # Audio Tour Guide: Architecture Options (backend, data, commercials)
 
-Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, §14 compares LLM providers, §15 covers data storage, and the decision log (§16) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
+Status: v0.4. Path, voice tier, and test approach decided. Front end (§10) and hosting (§11) are decided for the prototype and deferred for the full app. §12 lists what the prototype actually uses, §13 maps where code runs and which language fits each place, §14 compares LLM providers, §15 covers data storage, §16 defines the fallback ladder for describing a location, and the decision log (§17) records every decision with the alternatives considered. Monetization is in `monetization.md`. Builds on `spec.md`. All prices are USD list prices as of Nov 2026. Most third-party TTS/STT figures come from vendor pages and comparison roundups, so verify them before committing.
 
 ## 1. Summary
 
@@ -484,7 +484,72 @@ Ruled out: **Firestore as the main store** (no real spatial queries, awkward for
 
 Revisit if: the full app goes edge-first (§11 H4), which pulls sessions toward Durable Objects; analytics outgrow Postgres and PostHog (add ClickHouse or BigQuery); or questions need broad semantic search at scale (consider a dedicated vector database).
 
-## 16. Decision log
+## 16. Describing a location: the fallback ladder
+
+**Rule:** talk about the most specific thing near the listener that we have grounded material for. If that thing has nothing (left) to say, climb one rung to something broader. Drop back down as soon as something more specific comes into range. Silence is a valid last rung, never padding or invention (spec UC-10).
+
+### The ladders
+
+On foot (walking, standing, sightseeing bus in town):
+
+| Rung | Subject | Example (Lisbon) | Where the subject comes from | Where the material comes from |
+|---|---|---|---|---|
+| **L0** | The thing in view: building, monument, church, statue, plaque | Igreja da Madalena | Planner candidates (§2, `planner.ts`) | Wikipedia, Wikidata, heritage registers, OSM tags (`data-sources.md`) |
+| **L1** | The street, square, bridge, or park the listener is on | Rua da Madalena | The named way under the listener (nearest named street within ~25 m, aligned with heading; Nominatim's `road` in the prototype) | The street's own article or Wikidata item, its namesake (`name:etymology:wikidata`), city street-name databases. Also **aggregates** of buildings along it (below). |
+| **L2** | The ensemble or quarter: a historic zone, planned district, square with its surroundings | Baixa Pombalina (the grid rebuilt after 1755) | Heritage zones and ensembles (OSM, registers), `place=square`, historic district polygons | Ensemble articles, register text, aggregates |
+| **L3** | Neighbourhood or parish | Santa Maria Maior | Admin boundaries (OSM `admin_level`, mapped per country), Nominatim `neighbourhood` / `suburb` | Wikipedia (local language), Wikivoyage, area cards (B) |
+| **L4** | Town or city | Lisbon | Admin boundaries | Same as L3 |
+| **L5** | Region | Lisbon region / Estremadura | Admin boundaries, historical provinces, wine regions | Same |
+| **L6** | Country and big themes | Portugal: the Age of Discoveries, azulejos, the 1755 earthquake | Country, plus themes linked to the places already covered | Wikipedia, area cards |
+| **→** | Preview of the next interesting place | "In about four minutes you'll reach the cathedral" | Planner candidates beyond range | — |
+| **∅** | Silence | | | |
+
+By car (and buses between towns):
+
+| Rung | Subject | Example (Sintra → Cabo da Roca) | Where the subject comes from | Where the material comes from |
+|---|---|---|---|---|
+| **D0** | Landmark in view, near or far | Palácio da Pena on the ridge | Planner candidates, plus terrain visibility for distant ones (`data-sources.md`, Copernicus DEM) | As L0 |
+| **D1** | The road itself | EN247, or a stretch that follows a Roman road or the Camino | The matched road, its OSM route relations, and stretches running along Itiner-e Roman roads | Road articles, route articles, Itiner-e |
+| **D2** | Landscape in view | Serra de Sintra, the Atlantic cliffs, a protected area | Named natural features plus visibility; land cover under and ahead of the car; protected areas | Wikipedia, Natura 2000, land cover classes, geology |
+| **D3** | Settlement being passed | Colares | Admin boundaries, `place=*` nodes | As L3/L4 |
+| **D4** | Region | Sintra-Cascais Natural Park, the Colares wine region | Regions, parks, wine regions, historical provinces | As L5 |
+| **D5** | Country and big themes | Portuguese agriculture, the Atlantic climate | As L6 | As L6 |
+| **→ / ∅** | Preview, then silence | | | |
+
+### How the planner climbs
+
+1. **Mode picks the ladder and the starting rung.**
+   - Walking and standing: L0–L6.
+   - Sightseeing bus in town: L0–L6 too, with vehicle timing.
+   - Slow vehicle: L0, then L2 upwards. A street is passed too quickly to tell its story, except when stuck in traffic.
+   - Fast vehicle: D0–D5.
+2. **A rung qualifies only if it has enough unused material for the time budget.** Rule of thumb: at least **3× as many source words as words to be spoken**, after removing what this session has already covered. This stops the model padding a thin source into a long segment. In B, the same check counts unused facts on the fact card.
+3. **Pick the lowest qualifying rung.** Ties go to lens fit: a rung with material but no fit to the listener's lenses can be skipped for the next rung up that fits, but only one rung. The *Nature & Landscape* lens, for example, prefers D2 over D3; *Famous People* likes the street's namesake (L1).
+4. **Higher rungs come in chapters.** A neighbourhood, town, or region has more to tell than one segment: history, today, people, food, legends, chosen by lens. The session tracks which chapters of which subject have been told. A long walk through one quarter then gets several different L2/L3 segments, not one "area story" followed by silence. This replaces the prototype's "area once" rule.
+5. **Fit the rung to the gap.** Short gaps (under ~15 s) take a small item: a quick fact about the street, or silence. Long gaps take a chapter from a higher rung.
+6. **Limit generic content.** On foot, the guide climbs to L5/L6 at most every 15–20 minutes. Country-level talk on a city walk feels like filler. The listener's frequency setting (spec UC-10) can turn the higher rungs off altogether.
+7. **Drop back down immediately.** When a lower-rung subject with material comes into range (a new building, a new street), it takes over at the next sentence break.
+8. **Boundaries get a bridge.** Crossing into a new L2/L3 area earns one short line ("We've just crossed into Alfama"), and that area's chapters become available.
+9. **Say what scope we're on, sometimes.** When the guide climbs because a building has no record, it can say so ("Not much is recorded about this house, but the street…"). That's honest and builds trust. Use it occasionally, not every time.
+
+### Aggregates: grounded material for things with no article
+
+Many buildings have no article but do have tags or register entries: construction date, style, architect, heritage status, former use. One such building isn't a story, but twenty of them along a street are: "most houses along here went up between 1880 and 1910, several by the same architect." These **aggregates** are computed by code from the data, so they stay grounded. They give L1 and L2 material even where no one has written about the street. Sources: OSM `start_date` / `architect` / `heritage` tags, heritage registers, national building registries (`data-sources.md` §5).
+
+### Where it lives in the code
+
+- **Gather (I/O):** `resolveLadder(position, heading, mode)` returns the subjects on each rung, with their available material and Wikidata IDs, using the same cached sources as places (`pois.ts`, Nominatim, Overpass).
+- **Decide (pure, unit-tested):** the planner takes the ladder, session coverage (subject + chapter), budget, and lenses, and returns a plan. The prototype's `area` plan becomes `scope { rung, subject, chapter, budgetSec }`.
+- **Session:** coverage tracked per subject and chapter, not just per place.
+- **Debug panel:** shows the whole ladder: each rung's subject, how much material it has, and why the chosen rung won.
+
+### By stage
+
+- **Prototype (A):** L0 as now. L1 from Nominatim's road name plus OSM etymology and street Wikidata/Wikipedia tags. L3–L6 from Nominatim's address parts plus Wikipedia search by name. Chapters by lens. No aggregates yet.
+- **B:** street cards (L1), area cards per admin unit with chapters (L2–L5), aggregates computed in the pipeline, terrain visibility and road history for D0–D2.
+- **C:** higher-rung chapters are the most reusable content there is: every listener in a quarter hears the same area chapters. That makes them the first candidates for pre-rendered audio.
+
+## 17. Decision log
 
 | # | Topic | Decision | Alternatives considered | Status |
 |---|---|---|---|---|
@@ -507,5 +572,6 @@ Revisit if: the full app goes edge-first (§11 H4), which pulls sessions toward 
 | 16 | LLM provider | Open. Prototype default: Claude Sonnet 5.5 (already wired up). Next: make the provider swappable, then pick by a measured eval (§14). | Claude (Haiku, Sonnet, Opus); OpenAI (GPT-5 nano/mini, GPT-5.4 mini); Google (Gemini Flash-Lite, Flash, Pro); hosted open-weight models (GPT-OSS, Llama, Mistral, GLM); self-hosted open weights (not worth it at our scale) | Open |
 | 17 | Data storage, prototype | In memory: sessions and external-API caches reset on restart (§12, §15). Optional: a local SQLite file. | — (chosen to get the prototype running) | In place |
 | 18 | Data storage, full system | Leading candidate: Postgres-centric (PostGIS, JSONB, later pgvector), split into a rebuildable content database and an irreplaceable app database; R2 for audio; RevenueCat as the purchase record; PostHog (EU) for analytics; append-only listening ledger; no raw location traces by default. Static region bundles added for scale and offline (§15). | Specialised stores (document DB, Redis, vector DB, warehouse); edge-native (D1, KV, Durable Objects); Firestore (no spatial queries); static files only | Open |
+| 19 | Describing a location when there's little data | Fallback ladder (§16): on foot building → street → ensemble/quarter → neighbourhood → town → region → country → preview → silence; by car landmark → road → landscape → settlement → region → country. A rung needs 3× more source words than spoken words. Higher rungs told in chapters. Aggregates from building data. | One area story then silence (prototype); letting the model fill gaps freely (risks invented facts) | Decided, to implement |
 
 Product decisions (controls, cards, lenses, languages, scope) are logged in `spec.md` §11.

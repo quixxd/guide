@@ -204,7 +204,7 @@ Rev1 decisions that still hold: 2 (voice tiers as reference), 3 (testing anywher
 
 ## 6. Open questions
 
-1. Does HoboHost stream PHP output without buffering? (Check on first deploy.)
+1. ~~Does HoboHost stream PHP output without buffering?~~ Yes: tested 2026-11-15 with Gemini Flash-Lite through the relay, first words after 1.5 s, the reply arriving in 8 pieces over 0.4 s.
 2. Which Gemini model and thinking setting give the best narration within the free limits? Check the limits shown in AI Studio for our project.
 3. Which TTS voice for the rollout, and does it return timings?
 4. Where the pipeline runs (laptop at first, then a small server) and what its review page looks like.

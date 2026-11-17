@@ -12,7 +12,7 @@
 // &speed=2 (simulation speed), &debug=1 (planner details).
 
 import { areaPhoto, placeOutline, placePhoto } from "./details.js";
-import { describeDistance, describeSide, relativePosition } from "./geo.js";
+import { angleDiff, bearingDeg, compassName, distanceM } from "./geo.js";
 import { GpsSource, KeySource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
 import { walkingRoute } from "./sources.js";
@@ -444,6 +444,8 @@ function startLoading(title) {
   state.sentencesStarted = 0;
   $("caption").textContent = "";
   $("progress-bar").style.width = "0";
+  setRing(0);
+  pointArrow($("dir"), null);
   if (title) $("title").textContent = title;
   $("sub").textContent = "Getting the story…";
   $("photo").hidden = true;
@@ -767,16 +769,54 @@ function showQuiet(isBreak = false) {
 
 /** "On your right · 60 m", kept up to date as you walk. */
 function updateSubtitle() {
+  if (loading.on) return; // "Getting the story…" until the new part starts
   const plan = state.current?.prepared?.plan;
+  const arrow = $("dir");
   if (subjectPoi && state.pos) {
-    const rel = relativePosition(state.pos, state.pos.heading, subjectPoi);
-    const side = describeSide(rel);
-    $("sub").textContent = `${side.charAt(0).toUpperCase()}${side.slice(1)} · ${describeDistance(rel.distance)}`;
-  } else if (plan?.kind === "area") {
-    $("sub").textContent = "The area around you";
-  } else if (plan?.kind === "orientation") {
-    $("sub").textContent = "Getting your bearings";
+    const dist = distanceM(state.pos, subjectPoi);
+    $("sub").textContent = dist < 25 ? "Right here" : shortDistance(dist);
+    pointArrow(arrow, dist < 25 ? null : bearingDeg(state.pos, subjectPoi));
+    return;
   }
+  pointArrow(arrow, null);
+  if (plan?.kind === "area") $("sub").textContent = "The area around you";
+  else if (plan?.kind === "orientation") $("sub").textContent = "Getting your bearings";
+}
+
+/** "40 m", "1.2 km". */
+function shortDistance(m) {
+  return m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+/**
+ * Turns the arrow to point at a place. When we know where the listener faces, "up" means
+ * straight ahead (it turns as they turn); otherwise "up" means north, matching the map.
+ * @param {HTMLElement} arrow @param {number | null} bearing compass bearing to the place, null hides it
+ */
+let arrowTurns = null;
+function pointArrow(arrow, bearing) {
+  // An <svg>: its hidden attribute has to be toggled directly (.hidden only exists on HTML elements).
+  if (bearing === null) {
+    arrow.toggleAttribute("hidden", true);
+    arrowTurns = null;
+    return;
+  }
+  const facing = viewHeading();
+  const angle = facing === null ? bearing : bearing - facing;
+  // Keep the rotation continuous so the arrow never spins the long way round.
+  arrowTurns = arrowTurns === null ? angle : arrowTurns + angleDiff(angle, arrowTurns);
+  arrow.style.transform = `rotate(${arrowTurns}deg)`;
+  arrow.toggleAttribute("hidden", false);
+  const rel = ((angle % 360) + 360) % 360;
+  const words = facing === null ? `to the ${compassName(bearing)}`
+    : rel < 30 || rel > 330 ? "straight ahead" : rel < 150 ? "to your right" : rel <= 210 ? "behind you" : "to your left";
+  arrow.setAttribute("aria-label", words);
+}
+
+/** The ring around Play: how much of this part has been spoken (0..1). */
+const RING = 2 * Math.PI * 30;
+function setRing(fraction) {
+  $("ring").style.strokeDashoffset = String(RING * (1 - fraction));
 }
 
 /** Collapsed: the sentence being spoken. Pulled up: the whole part, said / now / still to come. */
@@ -787,7 +827,9 @@ function renderCaption() {
   const box = $("caption");
   const open = $("sheet").classList.contains("open");
   const total = cur?.streamDone ? cur.sentenceCount : Math.max(cur?.sentenceCount ?? 0, state.sentencesStarted + 1);
-  $("progress-bar").style.width = `${total ? Math.min(100, (state.sentencesStarted / total) * 100) : 0}%`;
+  const done = total ? Math.min(1, state.sentencesStarted / total) : 0;
+  $("progress-bar").style.width = `${done * 100}%`;
+  setRing(done);
   if (!open) {
     box.textContent = now || "";
     return;
@@ -966,6 +1008,7 @@ function updateCone() {
   coneLast = h;
   cone.style.display = "";
   cone.style.transform = `rotate(${coneTurns}deg)`;
+  updateSubtitle();
 }
 
 // Compass (device orientation). Smoothed; iPhone needs permission from a tap.

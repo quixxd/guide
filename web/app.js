@@ -706,9 +706,11 @@ window.addEventListener("resize", () => {
   if (!drag.active) setSheetState(drag.state, false);
 });
 
-// Keep the map's attribution and controls above the sheet, whatever its height.
+// Keep the map's attribution and controls above the sheet, whatever its height, and keep the
+// followed position in the middle of the map you can see as the sheet moves.
 new ResizeObserver(() => {
   document.documentElement.style.setProperty("--sheet-h", `${sheet.offsetHeight}px`);
+  if (typeof recentreIfFollowing === "function") recentreIfFollowing();
 }).observe(sheet);
 
 // ---------- Photo, full screen ----------
@@ -973,9 +975,31 @@ let routeLine = null;
 let followUntil = 0;
 let lastPois = [];
 map.on("dragstart", () => (followUntil = Date.now() + 20000));
+
+/** Space the top bar takes over the map (pill and recentre button). */
+const TOP_BAR_PX = 60;
+/** What the map keeps centred: your position once known, else where the map opened. */
+let focus = L.latLng(initialView[0], initialView[1]);
+
+/**
+ * Centres the map on a point in the part of the map you can actually see: between the top bar and
+ * the top of the sheet, not the middle of the whole screen (the sheet covers the map's lower part).
+ */
+function centreOn(ll, zoom = map.getZoom(), animate = false) {
+  focus = L.latLng(ll);
+  const shift = (sheet.offsetHeight - TOP_BAR_PX) / 2;
+  const centre = map.unproject(map.project(focus, zoom).add([0, shift]), zoom);
+  map.setView(centre, zoom, { animate });
+}
+
+/** After the sheet moves or resizes: put the followed point back in the middle of the visible map. */
+function recentreIfFollowing() {
+  if (Date.now() > followUntil) centreOn(focus);
+}
+
 $("recentre").addEventListener("click", () => {
   followUntil = 0;
-  if (state.pos) map.setView([state.pos.lat, state.pos.lon], Math.max(map.getZoom(), 17));
+  if (state.pos || meMarker) centreOn(meMarker?.getLatLng() ?? [state.pos.lat, state.pos.lon], Math.max(map.getZoom(), 17), true);
 });
 
 // "You are here": a blue dot with a fading view cone (Google Maps style) and an accuracy circle.
@@ -1000,7 +1024,7 @@ function showPosition(p) {
   const ll = [p.lat, p.lon];
   if (!meMarker) {
     meMarker = L.marker(ll, { icon: ME_ICON, interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
-    map.setView(ll, 17);
+    centreOn(ll, Math.max(map.getZoom(), 17));
   } else {
     meMarker.setLatLng(ll);
   }
@@ -1016,7 +1040,7 @@ function showPosition(p) {
     accuracyCircle = null;
   }
   updateCone();
-  if (Date.now() > followUntil) map.panTo(ll, { animate: false });
+  if (Date.now() > followUntil) centreOn(ll);
   if (DEBUG) renderDebug();
 }
 
@@ -1298,6 +1322,7 @@ $("install-ios").hidden = !(IOS && !STANDALONE);
 $("idle-keys").hidden = !KEYS;
 updateMeta();
 setSheetState("peek", false);
+centreOn(focus, map.getZoom());
 
 // On a phone, show where you are on the start screen already: the browser asks for location once,
 // and the dot follows you until a walk starts (then the walk's GPS takes over).

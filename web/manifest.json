@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Guide: audio walks",
-  "short_name": "Guide",
-  "description": "A personal audio tour guide that talks you through the streets you walk.",
+  "name": "Chatty Joe",
+  "short_name": "Chatty Joe",
+  "description": "Chatty Joe: a personal audio tour guide that talks you through the streets you walk.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

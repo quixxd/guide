@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-An app that acts as a personal audio tour guide for walks and drives.
+**Chatty Joe**: an app that acts as a personal audio tour guide for walks and drives.
 
 The spec documents live in `spec/`. **`spec/rev2/` is the current revision**; `spec/rev1/` is history and is not edited further.
 

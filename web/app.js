@@ -416,8 +416,8 @@ function stop() {
   showTarget(null);
   showLive(false);
   setSheetState("peek");
-  $("pill").textContent = "Guide";
-  status("Pick a walk and go. The guide talks about what's around you.");
+  $("pill").textContent = "Chatty Joe";
+  status("Pick a walk and go. Joe talks about what's around you.");
   renderControls();
 }
 
@@ -1254,7 +1254,7 @@ $("key-form").addEventListener("submit", (e) => {
   token = value;
   store.set("guide.token", value);
   $("key-form").hidden = true;
-  status("Pick a walk and go. The guide talks about what's around you.");
+  status("Pick a walk and go. Joe talks about what's around you.");
 });
 
 // Offer to install: Android/desktop Chrome hand us the install prompt; iPhone needs the Share menu.
@@ -1279,4 +1279,4 @@ $("idle-keys").hidden = !KEYS;
 updateMeta();
 setSheetState("peek", false);
 renderControls();
-status(token ? "Pick a walk and go. The guide talks about what's around you." : "Enter your access key to start.", !token);
+status(token ? "Pick a walk and go. Joe talks about what's around you." : "Enter your access key to start.", !token);

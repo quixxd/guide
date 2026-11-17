@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Guide</title>
-<meta name="description" content="A personal audio tour guide that talks you through the streets you walk.">
+<title>Chatty Joe</title>
+<meta name="description" content="Chatty Joe: a personal audio tour guide that talks you through the streets you walk.">
 <meta name="theme-color" content="#2563eb">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Guide">
+<meta name="apple-mobile-web-app-title" content="Chatty Joe">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
@@ -55,6 +55,7 @@
 
   .brand { display: flex; align-items: center; gap: 12px; }
   .brand img { border-radius: 11px; flex: 0 0 auto; }
+  .brand .brand-line { margin: 0; font-size: 13px; color: var(--muted); }
   .idle h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
   .idle p { margin: 4px 0 0; color: var(--muted); }
   .idle kbd { font: 600 12px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
@@ -181,13 +182,13 @@
 <div id="map"></div>
 
 <div class="top">
-  <span id="pill" class="pill">Guide</span>
+  <span id="pill" class="pill">Chatty Joe</span>
   <button id="recentre" class="round" type="button" aria-label="Centre the map on me">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
   </button>
 </div>
 
-<section id="sheet" class="sheet" aria-label="Guide">
+<section id="sheet" class="sheet" aria-label="Chatty Joe">
   <div id="drag" class="drag">
     <div id="grab" class="grab" role="button" tabindex="0" aria-label="Show more" aria-expanded="false"></div>
     <div id="live-head" class="head" hidden>
@@ -205,8 +206,8 @@
 
   <div id="body" class="body">
     <div id="idle" class="idle">
-      <div class="brand"><img src="icons/logo.svg" alt="" width="48" height="48"><h1>Walk with a guide</h1></div>
-      <p id="idle-status">Pick a walk and go. The guide talks about what's around you.</p>
+      <div class="brand"><img src="icons/logo.svg" alt="" width="48" height="48"><div><h1>Chatty Joe</h1><p class="brand-line">Your guide for walks</p></div></div>
+      <p id="idle-status">Pick a walk and go. Joe talks about what's around you.</p>
       <p id="idle-keys" hidden>Desktop: a simulated walk. Pick a walk, then move with the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys; hold <kbd>Shift</kbd> to go faster.</p>
       <form id="key-form" class="key-form" hidden>
         <label for="key-input">Access key</label>

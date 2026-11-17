@@ -704,11 +704,37 @@ function renderTopics() {
     b.type = "button";
     b.className = "chip";
     if (state.pendingFocus === c.poi.name) b.classList.add("queued");
-    b.textContent = c.poi.name;
+    const label = document.createElement("span");
+    label.textContent = c.poi.name;
+    b.append(label);
     b.addEventListener("click", () => tapTopic(c.poi));
     box.append(b);
+    addChipPhoto(b, c.poi);
   }
   refit();
+}
+
+/** A small round preview photo at the start of a topic button, when the place has one. */
+function addChipPhoto(button, poi) {
+  placePhoto(poi)
+    .then((photo) => {
+      if (!photo || !button.isConnected) return;
+      const img = new Image();
+      img.className = "chip-img";
+      img.alt = "";
+      img.onload = () => {
+        if (!button.isConnected) return;
+        button.prepend(img);
+        button.classList.add("with-img");
+      };
+      img.src = smallThumb(photo.url);
+    })
+    .catch(() => {});
+}
+
+/** The same Wikimedia image at 120 px, for small previews (Wikimedia only serves standard widths: 60, 120, 250, …). */
+function smallThumb(url) {
+  return url.replace(/\/\d+px-/, "/120px-").replace(/([?&]width=)\d+/, (_, prefix) => `${prefix}120`);
 }
 
 // ---------- Status ----------

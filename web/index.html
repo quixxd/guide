@@ -74,7 +74,10 @@
   .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; touch-action: pan-x; }
   .chips::-webkit-scrollbar { display: none; }
   .sheet.open .chips { flex-wrap: wrap; overflow: visible; }
-  .chip { flex: 0 0 auto; min-height: 44px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); font-size: 14px; font-weight: 500; }
+  .chip { flex: 0 0 auto; min-height: 44px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); font-size: 14px; font-weight: 500;
+          display: inline-flex; align-items: center; gap: 8px; }
+  .chip.with-img { padding: 4px 14px 4px 4px; }
+  .chip-img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--photo); }
   .chip.queued { border-color: var(--accent); color: var(--accent); }
 
   .controls { align-items: center; justify-content: space-between; padding: 4px 6px 0; }

@@ -272,6 +272,7 @@ function segmentEnded() {
 speaker.onSentence = (text) => {
   state.sentenceNow = text;
   state.sentencesStarted++;
+  loaded("spoken");
   renderCaption();
   // The last sentence of a complete segment has started: prepare the next one now.
   const cur = state.current;
@@ -284,6 +285,7 @@ speaker.onIdle = () => {
 
 /** @param {Error} error */
 function handleError(error) {
+  stopLoading();
   const statusCode = error instanceof RelayError ? error.status : 0;
   if (statusCode === 429) {
     pause();
@@ -357,6 +359,7 @@ async function start() {
 
 function pause() {
   if (!state.running || state.paused) return;
+  stopLoading();
   state.paused = true;
   abortSegments();
   if (state.source instanceof SimSource || state.source instanceof KeySource) state.source.setPaused(true);
@@ -376,6 +379,7 @@ function resume() {
 
 function skip() {
   if (!state.running || state.paused) return;
+  startLoading(null);
   abortSegments();
   startNext();
 }
@@ -392,6 +396,7 @@ function replay() {
 }
 
 function stop() {
+  stopLoading();
   state.running = false;
   state.paused = false;
   abortSegments();
@@ -414,12 +419,50 @@ function tapTopic(poi) {
   if (subjectPoi?.id === poi.id && state.current) return; // already talking about it
   state.pendingFocus = poi;
   renderTopics();
+  startLoading(poi.name);
   if (state.paused) {
     resume();
     return;
   }
   abortSegments();
   startNext();
+}
+
+// ---------- Waiting for the next part ----------
+//
+// After picking a place (or skipping), the old narration is cleared and a spinner takes the
+// photo's place until the new part has started speaking and its photo is in (or known missing).
+
+const loading = { on: false, spoken: false, photo: false };
+
+/** @param {string | null} title the picked place's name, shown straight away */
+function startLoading(title) {
+  loading.on = true;
+  loading.spoken = false;
+  loading.photo = false;
+  state.sentenceNow = "";
+  state.sentencesStarted = 0;
+  $("caption").textContent = "";
+  $("progress-bar").style.width = "0";
+  if (title) $("title").textContent = title;
+  $("sub").textContent = "Getting the story…";
+  $("photo").hidden = true;
+  $("photo-big").hidden = true;
+  $("thumb").classList.add("loading");
+  $("thumb").setAttribute("aria-busy", "true");
+}
+
+/** @param {"spoken" | "photo"} part */
+function loaded(part) {
+  if (!loading.on) return;
+  loading[part] = true;
+  if (loading.spoken && loading.photo) stopLoading();
+}
+
+function stopLoading() {
+  loading.on = false;
+  $("thumb").classList.remove("loading");
+  $("thumb").removeAttribute("aria-busy");
 }
 
 const ICON_PAUSE = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
@@ -714,6 +757,7 @@ function showSubject(prepared) {
 }
 
 function showQuiet(isBreak = false) {
+  stopLoading();
   subjectPoi = null;
   $("title").textContent = isBreak ? "A short break" : "Quiet stretch";
   $("sub").textContent = isBreak ? "More about the area in a moment." : "I'll speak up when there's something to tell.";
@@ -1036,7 +1080,15 @@ let shownTargetId = null;
 async function showTarget(poi, areaNames = []) {
   const names = poi ? [] : areaNames.filter(Boolean);
   const id = poi?.id ?? (names.length ? `area:${names.join("|")}` : null);
-  if (id === shownTargetId) return;
+  if (id === shownTargetId) {
+    // Same subject as before: its photo is already showing (or known missing).
+    if (currentPhoto) {
+      $("photo").hidden = false;
+      $("photo-big").hidden = false;
+    }
+    loaded("photo");
+    return;
+  }
   shownTargetId = id;
   outlineLayer.clearLayers();
   const thumb = /** @type {HTMLImageElement} */ ($("photo"));
@@ -1044,14 +1096,26 @@ async function showTarget(poi, areaNames = []) {
   thumb.hidden = true;
   big.hidden = true;
   currentPhoto = null;
-  if (!id) return;
+  if (!id) {
+    loaded("photo");
+    return;
+  }
 
   // Photo and outline arrive independently: the photo is usually quick, the outline search slower.
   const label = poi?.name ?? names[0];
   const photoJob = poi ? placePhoto(poi) : areaPhoto(names);
   photoJob.catch(() => null).then((photo) => {
-    if (!photo || shownTargetId !== id) return;
-    thumb.onload = () => { if (shownTargetId === id) thumb.hidden = false; };
+    if (shownTargetId !== id) return;
+    if (!photo) {
+      loaded("photo");
+      return;
+    }
+    thumb.onerror = () => loaded("photo");
+    thumb.onload = () => {
+      if (shownTargetId !== id) return;
+      thumb.hidden = false;
+      loaded("photo");
+    };
     big.onload = () => { if (shownTargetId === id) big.hidden = false; };
     thumb.src = photo.url;
     big.src = photo.url;

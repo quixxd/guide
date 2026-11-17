@@ -43,7 +43,7 @@ test("detectMode buckets speeds", () => {
 });
 
 test("first segment is an orientation listing what's ahead, not behind", () => {
-  const plan = planSegment(input({ isFirst: true, pois: [poi("Ahead", 200, 0), poi("Behind", -300, 0)] }));
+  const plan = planSegment(input({ isFirst: true, pois: [poi("Ahead", 120, 0), poi("Behind", -300, 0)] }));
   assert.equal(plan.kind, "orientation");
   if (plan.kind !== "orientation") return;
   assert.deepEqual(plan.upcoming.map((c) => c.poi.id), ["Ahead"]);
@@ -86,7 +86,7 @@ test("covered places aren't repeated; the area story comes next, then silence", 
 });
 
 test("on foot, a notable place ahead is narrated while approaching", () => {
-  const plan = planSegment(input({ pois: [poi("Cathedral", 250, 0, 3)] }));
+  const plan = planSegment(input({ pois: [poi("Cathedral", 100, 0, 3)] }));
   assert.equal(plan.kind, "poi");
   if (plan.kind === "poi") assert.equal(plan.phase, "approaching");
 });
@@ -119,4 +119,18 @@ test("overview and list articles are not treated as places", () => {
   const page = (title) => ({ lang: "en", pageId: title.length, title, lat: 53.07, lon: 8.8, extract: "A page.", length: 5000 });
   const names = mergePois([page("Bremen Roland"), page("Timeline of Bremen"), page("List of churches in Bremen")], []).map((p) => p.name);
   assert.deepEqual(names, ["Bremen Roland"]);
+});
+
+test("on foot, a notable place far ahead or off to the side isn't started on yet", () => {
+  const far = planSegment(input({ pois: [poi("Far cathedral", 250, 0, 3)], areaName: null }));
+  assert.equal(far.kind, "silence");
+  const aside = planSegment(input({ pois: [poi("Side church", 80, 80, 3)], areaName: null }));
+  assert.notEqual(aside.kind === "poi" && aside.phase, "approaching");
+});
+
+test("a place the listener picked is talked about next, even behind them", () => {
+  const behind = poi("Behind", -150, 0);
+  const plan = planSegment(input({ pois: [behind], focusPoi: behind }));
+  assert.equal(plan.kind, "focus");
+  if (plan.kind === "focus") assert.equal(plan.target?.poi.id, "Behind");
 });

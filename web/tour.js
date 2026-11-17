@@ -135,7 +135,8 @@ export function planSummary(plan) {
 
 /**
  * Works out what to say next at this position. Does all the lookups; doesn't touch the session.
- * @param {Session} session @param {Position} pos @param {string | null} focus
+ * @param {Session} session @param {Position} pos
+ * @param {string | Poi | null} focus a topic name, or a place the listener picked (talked about next, wherever it is)
  * @returns {Promise<Prepared>}
  */
 export async function prepareSegment(session, pos, focus = null) {
@@ -168,7 +169,8 @@ export async function prepareSegment(session, pos, focus = null) {
     areasCovered: session.areasCovered,
     areaName,
     isFirst: session.segments.length === 0,
-    focus,
+    focus: typeof focus === "string" ? focus : null,
+    focusPoi: focus && typeof focus === "object" ? focus : null,
     blocked,
   };
   const ranked = rankCandidates(input);

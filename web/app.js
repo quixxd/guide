@@ -75,6 +75,8 @@ function keyStart() {
 const GAP_AFTER_SEGMENT_MS = 1500;
 const RETRY_AFTER_ERROR_MS = 10000;
 const MAX_TOPICS = 5;
+/** Before zooming out to the district or town, a pause after the last part. */
+const AREA_BREAK_MS = 25000;
 
 const speaker = new Speaker();
 
@@ -94,6 +96,7 @@ class Segment {
     /** @type {import("./tour.js").Prepared | null} */
     this.prepared = null;
     this.silence = false;
+    this.isBreak = false;
     this.retryMs = 0;
     /** @type {Error | null} */
     this.error = null;
@@ -119,8 +122,10 @@ const state = {
   current: null,
   /** @type {Segment | null} the segment being prepared while the current one finishes */
   next: null,
-  /** A place the listener tapped: the next segment is about it. */
+  /** @type {import("./planner.js").Poi | null} A place the listener picked: the next segment is about it. */
   pendingFocus: null,
+  /** When the last part finished playing. */
+  lastEndedAt: 0,
   /** The sentence being spoken now, and how many of the current segment's have started. */
   sentenceNow: "",
   sentencesStarted: 0,
@@ -151,7 +156,7 @@ function startNext() {
   } else {
     state.current = seg;
     seg.active = true;
-    status(seg.focus ? `Turning to ${seg.focus}…` : state.session.segments.length ? "Looking around…" : "Finding where you are…");
+    status(seg.focus ? `Turning to ${seg.focus.name}…` : state.session.segments.length ? "Looking around…" : "Finding where you are…");
   }
   run(seg);
 }
@@ -171,9 +176,16 @@ async function run(seg) {
       placeOutline(target).catch(() => null);
       placePhoto(target).catch(() => null);
     }
+    const sinceLast = Date.now() - state.lastEndedAt;
+    const prefetching = state.current !== null && state.current !== seg;
     if (prepared.plan.kind === "silence") {
       seg.silence = true;
       seg.retryMs = prepared.plan.retryMs;
+    } else if (prepared.plan.kind === "area" && (prefetching || sinceLast < AREA_BREAK_MS)) {
+      // Zooming out to the district or town: take a break first, unless something nearby comes up.
+      seg.silence = true;
+      seg.isBreak = true;
+      seg.retryMs = prefetching ? AREA_BREAK_MS : AREA_BREAK_MS - sinceLast;
     } else {
       if (seg.active) record(seg);
       await streamNarration(token, prepared.system, prepared.prompt, (t) => {
@@ -200,8 +212,8 @@ function record(seg) {
   state.sentenceNow = "";
   state.sentencesStarted = 0;
   status("");
-  refreshPois();
   showSubject(seg.prepared);
+  refreshPois();
   renderTopics();
   renderCaption();
 }
@@ -235,7 +247,7 @@ function settle(seg) {
   }
   if (seg.silence) {
     state.current = null;
-    showQuiet();
+    showQuiet(seg.isBreak);
     schedule(seg.retryMs);
     return;
   }
@@ -247,6 +259,7 @@ function settle(seg) {
 
 function segmentEnded() {
   state.current = null;
+  state.lastEndedAt = Date.now();
   if (state.next) {
     const next = state.next;
     state.next = null;
@@ -389,24 +402,24 @@ function stop() {
   stopCompass();
   showTarget(null);
   showLive(false);
-  setSheetOpen(false);
+  setSheetState("peek");
   status("Tap Start and walk. The guide talks about what's around you.");
   renderControls();
 }
 
-/** A tapped topic becomes the next segment, after the current one finishes. */
+/** A picked place (topic button, or its name on the map) is talked about right away. */
 function tapTopic(poi) {
+  map.closePopup();
   if (!state.running) return;
-  state.pendingFocus = poi.name;
+  if (subjectPoi?.id === poi.id && state.current) return; // already talking about it
+  state.pendingFocus = poi;
   renderTopics();
-  status(`Next: ${poi.name}`);
-  if (state.next) {
-    state.next.ctl.abort();
-    state.next = null;
+  if (state.paused) {
+    resume();
+    return;
   }
-  if (state.paused) resume();
-  else if (!state.current) startNext();
-  else if (state.current.streamDone && speaker.queue.length === 0) startNext();
+  abortSegments();
+  startNext();
 }
 
 const ICON_PAUSE = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
@@ -442,13 +455,16 @@ window.addEventListener("online", () => {
 
 // ---------- Sheet ----------
 //
-// The sheet's height is set here. Dragging the handle row (or the narration, when scrolled to
-// the top) moves it with the finger; letting go snaps it open or collapsed, by flick speed or by
-// which side of halfway it is.
+// Three positions: "min" (a strip with the title and Play), "peek" (collapsed: photo, name, the
+// sentence being spoken, topics) and "open" (everything). The height is set here and follows the
+// finger while dragging; letting go snaps to the nearest position, or one step in the direction of
+// a quick flick.
 
 const sheet = $("sheet");
 const sheetBody = $("body");
-const drag = { open: false, active: false, startY: 0, startH: 0, collapsedH: 0, samples: [] };
+const ORDER = ["min", "peek", "open"];
+/** @type {{ state: "min" | "peek" | "open", active: boolean, startY: number, startH: number, heights: Record<string, number>, samples: {t: number, y: number}[] }} */
+const drag = { state: "peek", active: false, startY: 0, startH: 0, heights: { min: 0, peek: 0, open: 0 }, samples: [] };
 
 function showLive(on) {
   $("idle").style.display = on ? "none" : "";
@@ -459,15 +475,17 @@ function showLive(on) {
 
 const expandedHeight = () => Math.round(window.innerHeight * 0.88);
 
-/** Height of the collapsed sheet with its current content. */
-function collapsedHeight() {
-  const wasOpen = sheet.classList.contains("open");
+/** Natural height of the sheet in the given position, with its current content. */
+function naturalHeight(position) {
+  if (position === "open") return expandedHeight();
+  const classes = sheet.className;
   const height = sheet.style.height;
-  sheet.classList.remove("open");
+  sheet.classList.remove("open", "min", "settling");
+  if (position === "min") sheet.classList.add("min");
   sheet.style.height = "auto";
   const h = sheet.offsetHeight;
+  sheet.className = classes;
   sheet.style.height = height;
-  if (wasOpen) sheet.classList.add("open");
   return Math.min(h, expandedHeight());
 }
 
@@ -476,35 +494,39 @@ function setHeight(px, animate) {
   sheet.style.height = `${Math.round(px)}px`;
 }
 
-function setSheetOpen(open, animate = true) {
-  const target = open ? expandedHeight() : collapsedHeight();
-  drag.open = open;
-  sheet.classList.toggle("open", open);
-  $("grab").setAttribute("aria-expanded", String(open));
-  $("grab").setAttribute("aria-label", open ? "Show less" : "Show more");
-  if (!open) sheetBody.scrollTop = 0;
+/** @param {"min" | "peek" | "open"} position */
+function setSheetState(position, animate = true) {
+  const target = naturalHeight(position);
+  drag.state = position;
+  sheet.classList.toggle("open", position === "open");
+  sheet.classList.toggle("min", position === "min");
+  $("grab").setAttribute("aria-expanded", String(position === "open"));
+  $("grab").setAttribute("aria-label", position === "open" ? "Show less" : "Show more");
+  if (position !== "open") sheetBody.scrollTop = 0;
   setHeight(target, animate);
   renderCaption();
 }
 
-/** Keeps the collapsed sheet fitted to its content as that changes. */
+/** Keeps the sheet fitted to its content as that changes (the open sheet has a fixed height). */
 function refit() {
-  if (!drag.open && !drag.active) setHeight(collapsedHeight(), true);
+  if (drag.state !== "open" && !drag.active) setHeight(naturalHeight(drag.state), true);
 }
 
 function beginDrag(y) {
   drag.active = true;
   drag.startY = y;
   drag.startH = sheet.offsetHeight;
-  drag.collapsedH = collapsedHeight();
+  drag.heights = { min: naturalHeight("min"), peek: naturalHeight("peek"), open: expandedHeight() };
   drag.samples = [{ t: performance.now(), y }];
   sheet.classList.remove("settling");
 }
 
 function moveDrag(y) {
-  const h = Math.max(drag.collapsedH * 0.6, Math.min(expandedHeight(), drag.startH - (y - drag.startY)));
-  // Pulling up from collapsed: show the rest of the content underneath as the sheet rises.
-  if (h > drag.collapsedH + 8 && !sheet.classList.contains("open")) sheet.classList.add("open");
+  const { min, peek, open } = drag.heights;
+  const h = Math.max(min * 0.8, Math.min(open, drag.startH - (y - drag.startY)));
+  // Show the content that belongs to the height the sheet is being pulled to.
+  if (h > min + 8 && sheet.classList.contains("min")) sheet.classList.remove("min");
+  if (h > peek + 8 && !sheet.classList.contains("open")) sheet.classList.add("open");
   sheet.style.height = `${h}px`;
   const now = performance.now();
   drag.samples.push({ t: now, y });
@@ -517,14 +539,25 @@ function endDrag(y) {
   const dt = performance.now() - first.t;
   const velocity = dt > 0 ? (y - first.y) / dt : 0; // px per ms, positive = downwards
   const h = sheet.offsetHeight;
-  let open;
-  if (velocity < -0.35) open = true;
-  else if (velocity > 0.35) open = false;
-  else open = h > (drag.collapsedH + expandedHeight()) / 2;
-  setSheetOpen(open, true);
+  const snaps = ORDER.map((p) => ({ p, h: drag.heights[p] }));
+  let target;
+  if (velocity > 0.35) {
+    // Flicked down: the next position below where it is now.
+    target = [...snaps].reverse().find((s) => s.h < h - 4)?.p ?? "min";
+  } else if (velocity < -0.35) {
+    target = snaps.find((s) => s.h > h + 4)?.p ?? "open";
+  } else {
+    target = snaps.reduce((best, s) => (Math.abs(s.h - h) < Math.abs(best.h - h) ? s : best)).p;
+  }
+  setSheetState(/** @type {"min" | "peek" | "open"} */ (target), true);
 }
 
-// Handle row: the grab bar and the title row (not its Play button). Works for mouse and touch.
+/** Tap on the handle row: strip → collapsed → open → collapsed. */
+function tapSheet() {
+  setSheetState(drag.state === "peek" ? "open" : "peek");
+}
+
+// Handle row: the grab bar and the title row (not its Play button or photo). Mouse and touch.
 {
   const zone = $("drag");
   let pointer = null;
@@ -532,7 +565,7 @@ function endDrag(y) {
   let lastY = 0;
   let moved = false;
   zone.addEventListener("pointerdown", (e) => {
-    if (/** @type {HTMLElement} */ (e.target).closest("button")) return;
+    if (/** @type {HTMLElement} */ (e.target).closest("button, img")) return;
     pointer = e.pointerId;
     downY = lastY = e.clientY;
     moved = false;
@@ -551,20 +584,20 @@ function endDrag(y) {
     if (e.pointerId !== pointer) return;
     pointer = null;
     if (moved) endDrag(lastY);
-    else if (e.type === "pointerup") setSheetOpen(!drag.open);
+    else if (e.type === "pointerup") tapSheet();
   };
   zone.addEventListener("pointerup", finish);
   zone.addEventListener("pointercancel", finish);
   $("grab").addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setSheetOpen(!drag.open);
+      tapSheet();
     }
   });
 }
 
-// The content area (touch): swipe up on the collapsed sheet to open it; when open and scrolled
-// to the top, swipe down to collapse it. Otherwise it scrolls normally.
+// The content area (touch): swipe up on the collapsed sheet to open it, down to shrink it to the
+// strip; when open and scrolled to the top, swipe down to collapse it. Otherwise it scrolls.
 {
   let start = null;
   let dragging = false;
@@ -577,8 +610,8 @@ function endDrag(y) {
     const y = e.touches[0].clientY;
     const dy = y - start;
     if (!dragging) {
-      const pullDown = drag.open && sheetBody.scrollTop <= 0 && dy > 6;
-      const pullUp = !drag.open && dy < -6;
+      const pullDown = (drag.state === "peek" || sheetBody.scrollTop <= 0) && dy > 6;
+      const pullUp = drag.state !== "open" && dy < -6;
       if (!pullDown && !pullUp) return;
       dragging = true;
       beginDrag(start);
@@ -595,17 +628,61 @@ function endDrag(y) {
 
 // Tap the two-line narration to read it all.
 $("caption").addEventListener("click", () => {
-  if (!drag.open) setSheetOpen(true);
+  if (drag.state !== "open") setSheetState("open");
 });
 
 window.addEventListener("resize", () => {
-  if (!drag.active) setSheetOpen(drag.open, false);
+  if (!drag.active) setSheetState(drag.state, false);
 });
 
 // Keep the map's attribution and controls above the sheet, whatever its height.
 new ResizeObserver(() => {
   document.documentElement.style.setProperty("--sheet-h", `${sheet.offsetHeight}px`);
 }).observe(sheet);
+
+// ---------- Photo, full screen ----------
+
+/** @type {{ url: string, link: string, credit: string, name: string } | null} */
+let currentPhoto = null;
+
+/** The same Wikimedia image at 1280 px (a standard width it serves), for the full-screen view. */
+function largeImage(url) {
+  return url.replace(/\/\d+px-/, "/1280px-").replace(/([?&]width=)\d+/, (_, prefix) => `${prefix}1280`);
+}
+
+function openLightbox() {
+  if (!currentPhoto) return;
+  const img = /** @type {HTMLImageElement} */ ($("lightbox-img"));
+  img.src = currentPhoto.url; // shown at once, then swapped for the sharper one
+  const large = largeImage(currentPhoto.url);
+  if (large !== currentPhoto.url) {
+    const sharp = new Image();
+    sharp.onload = () => { if (!$("lightbox").hidden) img.src = large; };
+    sharp.src = large;
+  }
+  img.alt = currentPhoto.name;
+  $("lightbox-name").textContent = currentPhoto.name;
+  const credit = /** @type {HTMLAnchorElement} */ ($("lightbox-credit"));
+  credit.textContent = `Photo: ${currentPhoto.credit}`;
+  credit.href = currentPhoto.link;
+  $("lightbox").hidden = false;
+  $("lightbox-close").focus();
+}
+
+function closeLightbox() {
+  $("lightbox").hidden = true;
+}
+
+$("photo").addEventListener("click", openLightbox);
+$("photo-big").addEventListener("click", openLightbox);
+$("lightbox-close").addEventListener("click", closeLightbox);
+$("lightbox").addEventListener("click", (e) => {
+  if (!(/** @type {HTMLElement} */ (e.target).closest("a, img"))) closeLightbox();
+});
+$("lightbox-img").addEventListener("click", closeLightbox);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("lightbox").hidden) closeLightbox();
+});
 
 // ---------- What the guide is talking about ----------
 
@@ -636,10 +713,10 @@ function showSubject(prepared) {
   refit();
 }
 
-function showQuiet() {
+function showQuiet(isBreak = false) {
   subjectPoi = null;
-  $("title").textContent = "Quiet stretch";
-  $("sub").textContent = "I'll speak up when there's something to tell.";
+  $("title").textContent = isBreak ? "A short break" : "Quiet stretch";
+  $("sub").textContent = isBreak ? "More about the area in a moment." : "I'll speak up when there's something to tell.";
   $("caption").textContent = "";
   showTarget(null);
 }
@@ -705,7 +782,7 @@ function renderTopics() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "chip";
-    if (state.pendingFocus === c.poi.name) b.classList.add("queued");
+    if (state.pendingFocus?.id === c.poi.id) b.classList.add("queued");
     const label = document.createElement("span");
     label.textContent = c.poi.name;
     b.append(label);
@@ -901,20 +978,54 @@ function showPrepared(prepared) {
 function refreshPois() {
   poiLayer.clearLayers();
   const targetId = subjectPoi?.id ?? null;
-  for (const p of lastPois.slice(0, 150)) {
+  const pois = lastPois.slice(0, 150);
+  if (subjectPoi && !pois.some((p) => p.id === targetId)) pois.push(subjectPoi);
+  // The subject last, so it sits on top.
+  pois.sort((x, y) => Number(x.id === targetId) - Number(y.id === targetId));
+  for (const p of pois) {
     const covered = state.session?.covered.has(p.id);
     const isTarget = p.id === targetId;
-    L.circleMarker([p.lat, p.lon], {
-      radius: isTarget ? 9 : 6,
+    const marker = L.circleMarker([p.lat, p.lon], {
+      radius: isTarget ? 11 : 7,
       color: "#ffffff",
-      weight: 1.5,
+      weight: isTarget ? 3 : 1.5,
       fillColor: isTarget ? "#c2410c" : covered ? "#8a8f98" : "#ea7a2e",
-      fillOpacity: covered && !isTarget ? 0.7 : 1,
-    })
-      .bindTooltip(p.name)
-      .on("click", () => tapTopic(p))
-      .addTo(poiLayer);
+      fillOpacity: covered && !isTarget ? 0.75 : 1,
+    });
+    if (isTarget) {
+      marker.bindTooltip(p.name, { permanent: true, direction: "top", offset: [0, -12], className: "subject-label" });
+    }
+    marker.bindPopup(() => poiCard(p, isTarget), { closeButton: false, className: "poi-pop", offset: [0, -6], autoPanPaddingBottomRight: [20, 20] });
+    marker.addTo(poiLayer);
   }
+}
+
+/** The card shown when a place on the map is tapped: photo, and its name to tap to hear about it. */
+function poiCard(poi, isTarget) {
+  const el = document.createElement("div");
+  el.className = "pop";
+  const img = document.createElement("img");
+  img.alt = "";
+  img.hidden = true;
+  el.append(img);
+  const text = document.createElement("div");
+  text.className = "pop-text";
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "pop-name";
+  name.textContent = poi.name;
+  const hint = document.createElement("span");
+  hint.className = "pop-hint";
+  hint.textContent = isTarget ? "Playing now" : state.running ? "Tap the name to hear about it" : "Start the walk to hear about it";
+  name.addEventListener("click", () => tapTopic(poi));
+  text.append(name, hint);
+  el.append(text);
+  placePhoto(poi).then((photo) => {
+    if (!photo) return;
+    img.onload = () => { img.hidden = false; };
+    img.src = smallThumb(photo.url);
+  }).catch(() => {});
+  return el;
 }
 
 // ---------- The place being talked about: outline and photo ----------
@@ -932,11 +1043,24 @@ async function showTarget(poi, areaNames = []) {
   const big = /** @type {HTMLImageElement} */ ($("photo-big"));
   thumb.hidden = true;
   big.hidden = true;
+  currentPhoto = null;
   if (!id) return;
 
-  const [shapes, photo] = poi
-    ? await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)])
-    : [null, await areaPhoto(names).catch(() => null)];
+  // Photo and outline arrive independently: the photo is usually quick, the outline search slower.
+  const label = poi?.name ?? names[0];
+  const photoJob = poi ? placePhoto(poi) : areaPhoto(names);
+  photoJob.catch(() => null).then((photo) => {
+    if (!photo || shownTargetId !== id) return;
+    thumb.onload = () => { if (shownTargetId === id) thumb.hidden = false; };
+    big.onload = () => { if (shownTargetId === id) big.hidden = false; };
+    thumb.src = photo.url;
+    big.src = photo.url;
+    currentPhoto = { url: photo.url, link: photo.link, credit: photo.credit, name: label };
+    thumb.alt = label;
+    big.alt = `${label} (photo: ${photo.credit})`;
+  });
+  if (!poi) return; // areas get no outline
+  const shapes = await placeOutline(poi).catch(() => null);
   if (shownTargetId !== id) return; // moved on while looking up
   for (const shape of shapes ?? []) {
     // Dark orange reads well on the light topo map.
@@ -945,15 +1069,6 @@ async function showTarget(poi, areaNames = []) {
     } else {
       L.polyline(shape.coords, { color: "#c2410c", weight: 6, opacity: 0.8 }).addTo(outlineLayer);
     }
-  }
-  if (photo) {
-    thumb.onload = () => { if (shownTargetId === id) thumb.hidden = false; };
-    big.onload = () => { if (shownTargetId === id) big.hidden = false; };
-    thumb.src = photo.url;
-    big.src = photo.url;
-    const label = poi?.name ?? names[0];
-    thumb.alt = label;
-    big.alt = `${label} (photo: ${photo.credit})`;
   }
 }
 
@@ -984,6 +1099,6 @@ function renderDebug() {
 $("debug").hidden = !DEBUG;
 $("idle-keys").hidden = !KEYS;
 updateMeta();
-setSheetOpen(false, false);
+setSheetState("peek", false);
 renderControls();
 status(token ? "Tap Start and walk. The guide talks about what's around you." : "Add your key to the address: …/guide/?key=YOUR_KEY", !token);

@@ -129,10 +129,30 @@ async function outlineFromOverpass(poi) {
  */
 export function placeOutline(poi) {
   return cached(`outline:${poi.id}`, async () => {
-    const fromName = await outlineFromNominatim(poi).catch(() => null);
+    const fromName = keepSmall(await outlineFromNominatim(poi).catch(() => null));
     if (fromName) return fromName;
-    return outlineFromOverpass(poi).catch(() => null);
+    return keepSmall(await outlineFromOverpass(poi).catch(() => null));
   });
+}
+
+/** Widest extent of a shape, in metres. */
+function extentM(coords) {
+  const lats = coords.map((c) => c[0]);
+  const lons = coords.map((c) => c[1]);
+  const midLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const h = (Math.max(...lats) - Math.min(...lats)) * 111320;
+  const w = (Math.max(...lons) - Math.min(...lons)) * 111320 * Math.cos((midLat * Math.PI) / 180);
+  return Math.max(h, w);
+}
+
+/**
+ * A building, square or street is outlined; a district, town or region boundary never is.
+ * Shapes wider than this are dropped (streets may be longer, so lines get more room).
+ * @param {Shape[] | null} shapes
+ */
+function keepSmall(shapes) {
+  const kept = (shapes ?? []).filter((s) => extentM(s.coords) <= (s.kind === "line" ? 1500 : 400));
+  return kept.length ? kept : null;
 }
 
 // ---------- Photo of an area ----------

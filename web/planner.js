@@ -29,7 +29,9 @@ import { lensFit } from "./lenses.js";
 /**
  * @typedef {{ pos: Position, mode: Mode, pois: Poi[], lenses: Lens[],
  *   covered: ReadonlyMap<string, number>, announced: ReadonlySet<string>, areasCovered: ReadonlySet<string>,
- *   areaName: string | null, isFirst: boolean, focus: string | null, blocked?: ReadonlySet<string> }} PlanInput
+ *   areaName: string | null, isFirst: boolean, focus: string | null, focusPoi?: Poi | null,
+ *   blocked?: ReadonlySet<string> }} PlanInput
+ * focusPoi: a place the listener picked (topic button, map): talked about next, wherever it is.
  * blocked: places whose line of sight from the listener crosses another building.
  */
 
@@ -39,7 +41,8 @@ import { lensFit } from "./lenses.js";
  */
 export const PROFILES = {
   stationary: { horizon: 300, near: 200, visible: 200, minSeg: 20, maxSeg: 75, silenceMs: 30000 },
-  walking: { horizon: 500, near: 90, visible: 150, minSeg: 15, maxSeg: 60, silenceMs: 15000 },
+  // On foot, stay with what is right around you or directly ahead (a few minutes of walking at most).
+  walking: { horizon: 300, near: 70, visible: 120, minSeg: 15, maxSeg: 60, silenceMs: 15000 },
   vehicle_slow: { horizon: 1500, near: 250, visible: 300, minSeg: 12, maxSeg: 75, silenceMs: 15000 },
   vehicle_fast: { horizon: 6000, near: 1200, visible: 1500, minSeg: 10, maxSeg: 120, silenceMs: 20000 },
 };
@@ -52,6 +55,11 @@ const NOW_WINDOW_SEC = 25;
 export const FOV_LIMIT = 105;
 /** Right beside you: always in view, whatever the direction or buildings. */
 export const BESIDE_M = 25;
+/** On foot, a notable place is only started on ahead of time when it's this close and straight ahead. */
+const APPROACH_M = 120;
+const APPROACH_ANGLE = 40;
+/** The opening only mentions what's coming up this close. */
+const ORIENTATION_M = 150;
 
 /** @param {number | null} speed m/s @returns {Mode} */
 export function detectMode(speed) {
@@ -96,7 +104,7 @@ export function rankCandidates(input) {
     const proximity = 1 - rel.distance / profile.horizon;
     // Prefer what's in front of you, and what you can actually see.
     const inFront = rel.relAngle === null ? 0 : 0.4 * Math.cos((rel.relAngle * Math.PI) / 180);
-    const score = poi.notability + lensFit(text, lenses) + proximity + inFront - (visible ? 0 : 1);
+    const score = poi.notability + lensFit(text, lenses) + 2 * proximity + inFront - (visible ? 0 : 1);
     out.push({ ...rel, poi, eta, passDistance, score, visible });
   }
   return out.sort((a, b) => b.score - a.score);
@@ -117,6 +125,16 @@ export function planSegment(input) {
   const ranked = rankCandidates(input);
   const uncovered = ranked.filter((c) => !input.covered.has(c.poi.id) && !c.poi.categories.includes("area"));
 
+  if (input.focusPoi) {
+    const poi = input.focusPoi;
+    const dir = input.pos.heading ?? input.pos.facing ?? null;
+    const target = ranked.find((c) => c.poi.id === poi.id) ?? {
+      ...relativePosition(input.pos, dir, poi), poi, eta: null, passDistance: null, score: 0,
+      visible: !input.blocked?.has(poi.id),
+    };
+    return { kind: "focus", budgetSec: Math.max(45, profile.maxSeg), focus: poi.name, target };
+  }
+
   if (input.focus) {
     const f = input.focus.toLowerCase();
     const target =
@@ -130,7 +148,7 @@ export function planSegment(input) {
     return {
       kind: "orientation",
       budgetSec: input.mode === "vehicle_fast" ? 45 : 35,
-      upcoming: uncovered.filter((c) => c.side !== "behind").slice(0, 3),
+      upcoming: uncovered.filter((c) => c.side !== "behind" && c.distance <= ORIENTATION_M).slice(0, 3),
     };
   }
 
@@ -149,12 +167,13 @@ export function planSegment(input) {
   // 2. Something notable is coming up.
   const upcoming = uncovered.filter((c) => c.eta !== null && c.eta > NOW_WINDOW_SEC && c.poi.notability >= 1.5);
   if (upcoming.length) {
-    const target = upcoming[0];
     if (input.mode === "vehicle_slow" || input.mode === "vehicle_fast") {
+      const target = upcoming[0];
       if (!input.announced.has(target.poi.id)) return { kind: "lookahead", budgetSec: 14, target };
-    } else if (target.distance <= 300) {
-      // On foot, start telling the story while the listener walks up to it.
-      return {
+    } else {
+      // On foot, only something close and straight ahead: start its story while the listener walks up.
+      const target = upcoming.find((c) => c.distance <= APPROACH_M && (c.relAngle === null || Math.abs(c.relAngle) <= APPROACH_ANGLE));
+      if (target) return {
         kind: "poi",
         phase: "approaching",
         budgetSec: clamp(target.eta ?? profile.maxSeg, profile.minSeg, profile.maxSeg),

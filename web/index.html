@@ -96,6 +96,9 @@
   .only-open { display: none !important; }
   .sheet.open .only-open:not([hidden]) { display: revert !important; }
   .photo-big { width: 100%; height: 210px; object-fit: cover; border-radius: 16px; background: var(--photo); flex: 0 0 auto; }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sheet.open .facts.only-open:not([hidden]) { display: flex !important; }
+  .fact { font-size: 13px; font-weight: 500; padding: 5px 10px; border-radius: 8px; background: var(--soft); color: var(--fg); }
   .topics-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: -4px; }
   .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; touch-action: pan-x; }
   .chips::-webkit-scrollbar { display: none; }
@@ -211,6 +214,7 @@
       <div class="progress only-open" aria-hidden="true"><div id="progress-bar"></div></div>
       <p id="caption" title="Tap to read it all"></p>
       <img id="photo-big" class="photo-big only-open" alt="" hidden>
+      <div id="facts" class="facts only-open" hidden></div>
       <span class="topics-label only-open">Hear more about</span>
       <div id="chips" class="chips"></div>
       <div class="controls only-open">

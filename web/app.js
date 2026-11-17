@@ -11,7 +11,7 @@
 // Address options: ?key=TOKEN (remembered), ?sim=bremen or ?sim=lat,lon;lat,lon (simulated walk),
 // &speed=2 (simulation speed), &debug=1 (planner details).
 
-import { areaPhoto, placeOutline, placePhoto } from "./details.js";
+import { areaPhoto, factChips, placeFacts, placeOutline, placePhoto } from "./details.js";
 import { angleDiff, bearingDeg, compassName, distanceM } from "./geo.js";
 import { GpsSource, KeySource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
@@ -1139,6 +1139,8 @@ async function showTarget(poi, areaNames = []) {
   thumb.hidden = true;
   big.hidden = true;
   currentPhoto = null;
+  $("facts").hidden = true;
+  $("facts").textContent = "";
   if (!id) {
     loaded("photo");
     return;
@@ -1166,7 +1168,19 @@ async function showTarget(poi, areaNames = []) {
     thumb.alt = label;
     big.alt = `${label} (photo: ${photo.credit})`;
   });
-  if (!poi) return; // areas get no outline
+  if (!poi) return; // areas get no outline or facts
+  // Quick facts as chips under the big photo.
+  placeFacts(poi).then((facts) => {
+    if (shownTargetId !== id) return;
+    const box = $("facts");
+    for (const text of factChips(facts)) {
+      const chip = document.createElement("span");
+      chip.className = "fact";
+      chip.textContent = text;
+      box.append(chip);
+    }
+    box.hidden = !box.childElementCount;
+  }).catch(() => {});
   const shapes = await placeOutline(poi).catch(() => null);
   if (shownTargetId !== id) return; // moved on while looking up
   for (const shape of shapes ?? []) {

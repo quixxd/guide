@@ -155,6 +155,137 @@ function keepSmall(shapes) {
   return kept.length ? kept : null;
 }
 
+// ---------- Quick facts ----------
+
+/**
+ * @typedef {{ built?: string, destroyed?: string, architects: string[], styles: string[], unesco: boolean,
+ *   heritage: string[], height?: number, floors?: number, namedAfter: string[], commissionedBy: string[],
+ *   dedicatedTo: string[], religion: string[], usedBy: string[], partOf: string[],
+ *   hours?: string, fee?: boolean, wheelchair?: boolean }} Facts
+ */
+
+const WD_PROPS = {
+  P84: "architects", P149: "styles", P138: "namedAfter", P88: "commissionedBy", P112: "commissionedBy",
+  P417: "dedicatedTo", P140: "religion", P466: "usedBy", P361: "partOf", P1435: "heritage",
+};
+
+/** "1405", "the 1400s", "the 15th century" from a Wikidata time and its precision. */
+export function formatWikidataTime(iso, precision) {
+  const m = iso.match(/^([+-]?)(\d+)-/);
+  if (!m) return undefined;
+  let year = Number(m[2]);
+  const bc = m[1] === "-";
+  if (precision <= 7) {
+    const c = Math.floor((year - 1) / 100) + 1;
+    const suffix = c % 10 === 1 && c !== 11 ? "st" : c % 10 === 2 && c !== 12 ? "nd" : c % 10 === 3 && c !== 13 ? "rd" : "th";
+    return `the ${c}${suffix} century${bc ? " BC" : ""}`;
+  }
+  if (precision === 8) year = Math.floor(year / 10) * 10;
+  return precision === 8 ? `the ${year}s${bc ? " BC" : ""}` : `${year}${bc ? " BC" : ""}`;
+}
+
+/**
+ * Structured facts about a place: Wikidata (one query, names resolved) plus OpenStreetMap tags.
+ * Empty fields when nothing is known. @param {Poi} poi @returns {Promise<Facts>}
+ */
+export function placeFacts(poi) {
+  return cached(`facts:${poi.id}`, async () => {
+    /** @type {Facts} */
+    const f = { architects: [], styles: [], unesco: false, heritage: [], namedAfter: [], commissionedBy: [], dedicatedTo: [], religion: [], usedBy: [], partOf: [] };
+    if (poi.wikidata && /^Q\d+$/.test(poi.wikidata)) {
+      const query = `SELECT ?prop ?val ?valLabel ?prec WHERE {
+  VALUES ?item { wd:${poi.wikidata} }
+  { VALUES ?prop { ${Object.keys(WD_PROPS).map((p) => `wdt:${p}`).join(" ")} wdt:P757 wdt:P2048 wdt:P1101 } ?item ?prop ?val . }
+  UNION {
+    VALUES (?dp ?prop) { (p:P571 wdt:P571) (p:P576 wdt:P576) }
+    ?item ?dp ?st . ?st ?psv ?tv . ?tv wikibase:timeValue ?val ; wikibase:timePrecision ?prec .
+    FILTER(STRSTARTS(STR(?psv), "http://www.wikidata.org/prop/statement/value/P5"))
+  }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,fr,es,it,pt,nl". }
+}`;
+      const data = await fetchJson(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, { headers: { accept: "application/sparql-results+json" } }, 8000);
+      let builtRaw = "";
+      let destroyedRaw = "";
+      for (const b of data.results?.bindings ?? []) {
+        const prop = b.prop.value.split("/").pop();
+        const label = b.valLabel?.value ?? b.val.value;
+        if (prop === "P571" || prop === "P576") {
+          const when = formatWikidataTime(b.val.value, Number(b.prec?.value ?? 9));
+          // Keep the earliest date if there are several.
+          if (when && prop === "P571" && (!builtRaw || b.val.value < builtRaw)) {
+            f.built = when;
+            builtRaw = b.val.value;
+          }
+          if (when && prop === "P576" && (!destroyedRaw || b.val.value < destroyedRaw)) {
+            f.destroyed = when;
+            destroyedRaw = b.val.value;
+          }
+        } else if (prop === "P757") {
+          f.unesco = true;
+        } else if (prop === "P2048") {
+          const h = Number(b.val.value);
+          if (h > 0 && h < 1000) f.height = Math.round(h * 10) / 10;
+        } else if (prop === "P1101") {
+          const n = Number(b.val.value);
+          if (n > 0 && n < 200) f.floors = n;
+        } else if (WD_PROPS[prop] && !/^Q\d+$/.test(label) && !f[WD_PROPS[prop]].includes(label)) {
+          f[WD_PROPS[prop]].push(label); // unlabelled items come back as bare IDs: skipped
+        }
+      }
+      if (f.heritage.some((h) => /world heritage/i.test(h))) f.unesco = true;
+    }
+    // OpenStreetMap tags fill the gaps.
+    const t = poi.tags ?? {};
+    if (!f.built && /^\d{3,4}$/.test(t.start_date ?? "")) f.built = t.start_date;
+    if (!f.architects.length && t.architect) f.architects.push(t.architect);
+    if (!f.styles.length && t["building:architecture"]) f.styles.push(t["building:architecture"].replace(/_/g, " "));
+    if (!f.height && Number(t.height) > 0) f.height = Number(t.height);
+    if (!f.floors && Number(t["building:levels"]) > 0) f.floors = Number(t["building:levels"]);
+    if (t.opening_hours && t.opening_hours.length <= 40) f.hours = t.opening_hours;
+    if (t.fee === "yes" || t.fee === "no") f.fee = t.fee === "yes";
+    if (t.wheelchair === "yes") f.wheelchair = true;
+    return f;
+  });
+}
+
+/** The few most telling facts as short chips, e.g. ["Built 1405", "Weser Renaissance", "UNESCO World Heritage"]. */
+export function factChips(f, max = 4) {
+  const chips = [];
+  const when = (v) => (v.startsWith("the ") ? `in ${v}` : v); // "Built in the 1400s", "Built 1405"
+  if (f.built) chips.push(`Built ${when(f.built)}`);
+  if (f.unesco) chips.push("UNESCO World Heritage");
+  if (f.styles.length) chips.push(f.styles.slice(0, 2).join(" · "));
+  if (f.architects.length) chips.push(`Architect: ${f.architects.slice(0, 2).join(", ")}`);
+  if (f.dedicatedTo.length) chips.push(`Dedicated to ${f.dedicatedTo[0]}`);
+  if (f.height) chips.push(`${f.height} m tall`);
+  if (f.destroyed) chips.push(`Destroyed ${when(f.destroyed)}`);
+  if (f.namedAfter.length) chips.push(`Named after ${f.namedAfter[0]}`);
+  if (f.usedBy.length) chips.push(`Today: ${f.usedBy[0]}`);
+  if (!f.unesco && f.heritage.length) chips.push("Listed monument");
+  if (f.hours) chips.push(`Open ${f.hours}`);
+  if (f.fee !== undefined) chips.push(f.fee ? "Entry fee" : "Free entry");
+  return chips.slice(0, max);
+}
+
+/** The facts as a plain list for the narration prompt (empty string when nothing is known). */
+export function factsText(f) {
+  const lines = [];
+  if (f.built) lines.push(`Built: ${f.built}`);
+  if (f.destroyed) lines.push(`Destroyed: ${f.destroyed}`);
+  if (f.architects.length) lines.push(`Architect: ${f.architects.join(", ")}`);
+  if (f.styles.length) lines.push(`Style: ${f.styles.join(", ")}`);
+  if (f.commissionedBy.length) lines.push(`Commissioned or founded by: ${f.commissionedBy.join(", ")}`);
+  if (f.dedicatedTo.length) lines.push(`Dedicated to: ${f.dedicatedTo.join(", ")}`);
+  if (f.religion.length) lines.push(`Religion: ${f.religion.join(", ")}`);
+  if (f.namedAfter.length) lines.push(`Named after: ${f.namedAfter.join(", ")}`);
+  if (f.usedBy.length) lines.push(`Used by today: ${f.usedBy.join(", ")}`);
+  if (f.heritage.length) lines.push(`Heritage status: ${f.heritage.join("; ")}`);
+  if (f.partOf.length) lines.push(`Part of: ${f.partOf.join("; ")}`);
+  if (f.height) lines.push(`Height: ${f.height} m`);
+  if (f.floors) lines.push(`Floors: ${f.floors}`);
+  return lines.join("\n");
+}
+
 // ---------- Photo of an area ----------
 
 /**

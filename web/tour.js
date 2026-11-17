@@ -9,6 +9,7 @@ import { PROFILES, detectMode, planSegment, rankCandidates } from "./planner.js"
 import { localWikiLang, poisAround } from "./pois.js";
 import { articleText, reverseGeocode, searchArticle } from "./sources.js";
 import { buildingsAround } from "./buildings.js";
+import { factsText, placeFacts } from "./details.js";
 import { hiddenPlaces } from "./visibility.js";
 
 /** @typedef {import("./planner.js").Poi} Poi */
@@ -73,6 +74,19 @@ async function poiSource(poi, full) {
   return { title: `${poi.wiki.title} (Wikipedia, ${poi.wiki.lang})`, text: text || poi.wiki.extract };
 }
 
+/** How long to wait for Wikidata facts before writing without them. */
+const FACTS_WAIT_MS = 3000;
+
+/** Wikidata / OpenStreetMap facts about a place as one source, or null. @param {Poi} poi */
+async function factsSource(poi) {
+  const facts = await Promise.race([
+    placeFacts(poi).catch(() => null),
+    new Promise((r) => setTimeout(() => r(null), FACTS_WAIT_MS)),
+  ]);
+  const text = facts ? factsText(facts) : "";
+  return text ? { title: `Facts about ${poi.name} (Wikidata, OpenStreetMap)`, text } : null;
+}
+
 /** @param {Exclude<Plan, { kind: "silence" }>} plan @param {Place | null} place */
 async function sourcesFor(plan, place) {
   /** @type {{ title: string, text: string }[]} */
@@ -85,13 +99,13 @@ async function sourcesFor(plan, place) {
 
   switch (plan.kind) {
     case "poi":
-      await add(poiSource(plan.target.poi, true));
+      await Promise.all([add(factsSource(plan.target.poi)), add(poiSource(plan.target.poi, true))]);
       break;
     case "lookahead":
-      await add(poiSource(plan.target.poi, false));
+      await Promise.all([add(factsSource(plan.target.poi)), add(poiSource(plan.target.poi, false))]);
       break;
     case "focus":
-      if (plan.target) await add(poiSource(plan.target.poi, true));
+      if (plan.target) await Promise.all([add(factsSource(plan.target.poi)), add(poiSource(plan.target.poi, true))]);
       else await add(search([plan.focus, place?.town].filter(Boolean).join(" ")));
       break;
     case "area":

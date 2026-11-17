@@ -27,6 +27,7 @@ How to write:
 Facts:
 - Use only facts found in SOURCES or the brief. If the sources don't cover something, don't fill the gap from memory: say less, or say you're not sure.
 - Never make up names, dates, numbers or stories.
+- A "Facts about …" source is structured data from Wikidata and OpenStreetMap: trust it for dates, architects, styles and heritage status. "the 1400s" means only the decade is known; "the 15th century" only the century: don't turn those into an exact year.
 
 Length:
 - Stay within the word budget: it is sized so you finish before the listener reaches the next thing. Ending a little short is better than running over.`;

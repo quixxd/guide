@@ -108,7 +108,7 @@
 
   .controls { align-items: center; justify-content: space-between; padding: 4px 6px 0; }
   .sheet.open .controls.only-open:not([hidden]) { display: flex !important; }
-  .ctl { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--soft); display: grid; place-items: center; }
+  .ctl { min-height: 48px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--soft); display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
   .ctl:disabled { opacity: .35; }
 
   #status { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.2em; flex: 0 0 auto; }
@@ -119,7 +119,9 @@
   /* Third state: pushed all the way down to a strip with just the title and Play. */
   .sheet.min .body { display: none; }
   /* The strip keeps the essentials on one line: name, arrow and distance, Play with its ring. */
-  .sheet.min .thumb { display: none; }
+  .sheet.min .thumb { width: 42px; height: 42px; border-radius: 9px; }
+  .sheet.min .thumb.loading::after { width: 18px; height: 18px; border-width: 2px; }
+  .sheet.min .thumb-icon { width: 20px; height: 20px; }
   .sheet.min .head { padding-bottom: 8px; }
   .sheet.min .play { width: 42px; height: 42px; }
   .sheet.min .titles { flex-direction: row; align-items: center; gap: 10px; }
@@ -212,14 +214,17 @@
       <span class="topics-label only-open">Hear more about</span>
       <div id="chips" class="chips"></div>
       <div class="controls only-open">
-        <button id="replay" class="ctl" type="button" aria-label="Replay this part">
+        <button id="replay" class="ctl" type="button">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>
+          <span>Replay</span>
         </button>
-        <button id="skip" class="ctl" type="button" aria-label="Skip">
+        <button id="skip" class="ctl" type="button">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l9 7-9 7z"></path><path d="M19 5v14"></path></svg>
+          <span>Next</span>
         </button>
-        <button id="stop" class="ctl" type="button" aria-label="End the walk">
+        <button id="stop" class="ctl" type="button">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+          <span>Stop walk</span>
         </button>
       </div>
       <p id="status"></p>

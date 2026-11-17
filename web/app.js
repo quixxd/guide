@@ -709,9 +709,7 @@ function openLightbox() {
   }
   img.alt = currentPhoto.name;
   $("lightbox-name").textContent = currentPhoto.name;
-  const credit = /** @type {HTMLAnchorElement} */ ($("lightbox-credit"));
-  credit.textContent = `Photo: ${currentPhoto.credit}`;
-  credit.href = currentPhoto.link;
+  $("lightbox-credit").textContent = `Photo: ${currentPhoto.credit}`;
   $("lightbox").hidden = false;
   $("lightbox-close").focus();
 }
@@ -724,7 +722,7 @@ $("photo").addEventListener("click", openLightbox);
 $("photo-big").addEventListener("click", openLightbox);
 $("lightbox-close").addEventListener("click", closeLightbox);
 $("lightbox").addEventListener("click", (e) => {
-  if (!(/** @type {HTMLElement} */ (e.target).closest("a, img"))) closeLightbox();
+  if (!(/** @type {HTMLElement} */ (e.target).closest("img"))) closeLightbox();
 });
 $("lightbox-img").addEventListener("click", closeLightbox);
 document.addEventListener("keydown", (e) => {

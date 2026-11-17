@@ -151,7 +151,6 @@
               align-items: center; justify-content: center; gap: 12px; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); }
   .lightbox img { max-width: 100%; max-height: calc(100% - 60px); object-fit: contain; border-radius: 8px; }
   .lightbox-caption { color: #e4e4e7; font-size: 14px; text-align: center; }
-  .lightbox-caption a { color: #a5c4ff; }
   .lightbox-close { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%;
                     border: 0; background: rgb(255 255 255 / .15); color: #fff; display: grid; place-items: center; }
 
@@ -232,7 +231,7 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
   </button>
   <img id="lightbox-img" alt="">
-  <p class="lightbox-caption"><span id="lightbox-name"></span> · <a id="lightbox-credit" target="_blank" rel="noopener"></a></p>
+  <p class="lightbox-caption"><span id="lightbox-name"></span> · <span id="lightbox-credit"></span></p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>

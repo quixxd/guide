@@ -21,7 +21,8 @@ export function localWikiLang(countryCode) {
 /** How long to wait for OpenStreetMap before narrating from Wikipedia alone. */
 const OSM_WAIT_MS = 4000;
 
-const AREA_RE = /\b(is a (civil )?parish|freguesia|is a (neighbourhood|neighborhood|district|quarter|municipality|city|town|village))\b/i;
+// "Mitte is a borough of Bremen", "… ist ein Stadtteil": areas, told as area stories, not passed as sights.
+const AREA_RE = /\b(is a (civil )?parish|freguesia|(is|are) an? ([\w-]+ )?(neighbourhood|neighborhood|district|borough|quarter|suburb|locality|ward|municipality|city|town|village)|(ist|sind) (ein|eine) ([\w-]+ )?(Stadtteil|Ortsteil|Stadtbezirk|Bezirk|Gemeinde))\b/i;
 const LOW_VALUE_RE = /\b(metro station|railway station|bus station|school|hospital|hotel|office building|stadium)\b/i;
 
 function categoriesFromTags(tags) {

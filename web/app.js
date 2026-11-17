@@ -159,7 +159,9 @@ function startNext() {
 /** @param {Segment} seg */
 async function run(seg) {
   try {
-    const prepared = await prepareSegment(state.session, { ...state.pos }, seg.focus);
+    // Where the listener faces (compass, or the last walking direction) sets the field of view
+    // while standing still.
+    const prepared = await prepareSegment(state.session, { ...state.pos, facing: viewHeading() }, seg.focus);
     if (seg.ctl.signal.aborted) return;
     seg.prepared = prepared;
     showPrepared(prepared);
@@ -967,10 +969,11 @@ function renderDebug() {
   lines.push(`current ${state.current ? (state.current.streamDone ? "done" : "streaming") : "-"}, next ${state.next ? (state.next.streamDone ? "ready" : "preparing") : "-"}`);
   if (lastPrepared) {
     lines.push(`mode ${lastPrepared.mode}, place ${lastPrepared.place?.label ?? "?"}`);
+    lines.push(`buildings ${lastPrepared.buildingsKnown ? `loaded, ${lastPrepared.hiddenCount} places hidden` : "not loaded (field of view only)"}`);
     lines.push(`plan ${planSummary(lastPrepared.plan)}`);
     for (const c of lastPrepared.ranked.slice(0, 8)) {
       const covered = state.session?.covered.has(c.poi.id) ? " ✓" : "";
-      lines.push(`  ${c.score.toFixed(2)} ${c.poi.name} ${c.side} ${Math.round(c.distance)} m${c.eta !== null ? ` eta ${Math.round(c.eta)}s` : ""}${covered}`);
+      lines.push(`  ${c.score.toFixed(2)} ${c.poi.name} ${c.side} ${Math.round(c.distance)} m${c.eta !== null ? ` eta ${Math.round(c.eta)}s` : ""}${c.visible ? "" : " (hidden)"}${covered}`);
     }
   }
   $("debug").textContent = lines.join("\n");

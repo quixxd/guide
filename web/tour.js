@@ -8,6 +8,8 @@ import { NARRATION_SYSTEM, narrationPrompt } from "./narrator.js";
 import { PROFILES, detectMode, planSegment, rankCandidates } from "./planner.js";
 import { localWikiLang, poisAround } from "./pois.js";
 import { articleText, reverseGeocode, searchArticle } from "./sources.js";
+import { buildingsAround } from "./buildings.js";
+import { hiddenPlaces } from "./visibility.js";
 
 /** @typedef {import("./planner.js").Poi} Poi */
 /** @typedef {import("./planner.js").Plan} Plan */
@@ -105,6 +107,9 @@ async function sourcesFor(plan, place) {
   return sources;
 }
 
+/** How long to wait for building outlines before planning without them. */
+const BUILDINGS_WAIT_MS = 3000;
+
 function areaNameFor(place) {
   if (!place) return null;
   return [...new Set([place.neighbourhood ?? place.town, place.town].filter(Boolean))].join(", ") || null;
@@ -125,7 +130,7 @@ export function planSummary(plan) {
 
 /**
  * @typedef {{ plan: Plan, mode: string, place: Place | null, pois: Poi[], ranked: Candidate[],
- *   areaName: string | null, system?: string, prompt?: string }} Prepared
+ *   areaName: string | null, buildingsKnown: boolean, hiddenCount: number, system?: string, prompt?: string }} Prepared
  */
 
 /**
@@ -136,12 +141,23 @@ export function planSummary(plan) {
 export async function prepareSegment(session, pos, focus = null) {
   const mode = detectMode(pos.speed);
   const place = await reverseGeocode(pos.lat, pos.lon).catch(() => null);
-  const found = await poisAround(pos.lat, pos.lon, PROFILES[mode].horizon, localWikiLang(place?.countryCode)).catch(() => []);
+  const horizon = PROFILES[mode].horizon;
+  // Building outlines for the line-of-sight check. Don't wait long: without them the planner
+  // still uses the field of view, just not walls.
+  const buildingsSoon = Promise.race([
+    buildingsAround(pos.lat, pos.lon, Math.min(horizon, 600)).catch(() => null),
+    new Promise((r) => setTimeout(() => r(null), BUILDINGS_WAIT_MS)),
+  ]);
+  const [found, buildings] = await Promise.all([
+    poisAround(pos.lat, pos.lon, horizon, localWikiLang(place?.countryCode)).catch(() => []),
+    buildingsSoon,
+  ]);
   // The town's, district's or region's own article is the area you're in, not a place you pass
   // (otherwise "Bremen" turns up as a sight 200 m ahead). Area stories cover those.
   const areaNames = new Set([place?.town, place?.neighbourhood, place?.region, place?.country].filter(Boolean).map((n) => n.toLowerCase()));
   const pois = found.filter((p) => ![p.name, ...(p.altNames ?? [])].some((n) => areaNames.has(n.toLowerCase())));
   const areaName = areaNameFor(place);
+  const blocked = buildings ? hiddenPlaces(pos, pois, buildings, Math.min(horizon, 600)) : new Set();
   const input = {
     pos,
     mode,
@@ -153,11 +169,12 @@ export async function prepareSegment(session, pos, focus = null) {
     areaName,
     isFirst: session.segments.length === 0,
     focus,
+    blocked,
   };
   const ranked = rankCandidates(input);
   const plan = planSegment(input);
   /** @type {Prepared} */
-  const prepared = { plan, mode, place, pois, ranked, areaName };
+  const prepared = { plan, mode, place, pois, ranked, areaName, buildingsKnown: !!buildings, hiddenCount: blocked.size };
   if (plan.kind === "silence") return prepared;
 
   const sources = await sourcesFor(plan, place);

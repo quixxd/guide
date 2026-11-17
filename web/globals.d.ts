@@ -4,3 +4,6 @@ interface Window {
   SpeechRecognition?: any;
   webkitSpeechRecognition?: any;
 }
+
+// Libraries loaded at run time from the jsDelivr CDN (see buildings.js).
+declare module "https://cdn.jsdelivr.net/npm/*";

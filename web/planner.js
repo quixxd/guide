@@ -7,13 +7,17 @@ import { lensFit } from "./lenses.js";
 /** @typedef {import("./geo.js").Relative} Relative */
 /** @typedef {import("./lenses.js").Lens} Lens */
 /** @typedef {"stationary" | "walking" | "vehicle_slow" | "vehicle_fast"} Mode */
-/** @typedef {{ lat: number, lon: number, heading: number | null, speed: number | null }} Position */
+/**
+ * @typedef {{ lat: number, lon: number, heading: number | null, speed: number | null, facing?: number | null }} Position
+ * heading: direction of travel (null when standing). facing: where the listener looks (compass, or the
+ * last walking direction), used for the field of view when standing still.
+ */
 /**
  * @typedef {{ id: string, name: string, lat: number, lon: number, categories: string[], notability: number,
  *   wiki?: { lang: string, title: string, extract: string, length: number }, wikidata?: string,
  *   tags?: Record<string, string>, altNames?: string[] }} Poi
  */
-/** @typedef {Relative & { poi: Poi, eta: number | null, passDistance: number | null, score: number }} Candidate */
+/** @typedef {Relative & { poi: Poi, eta: number | null, passDistance: number | null, score: number, visible: boolean }} Candidate */
 /**
  * @typedef {{ kind: "orientation", budgetSec: number, upcoming: Candidate[] }
  *   | { kind: "poi", phase: "now" | "approaching" | "deeper", budgetSec: number, target: Candidate }
@@ -25,7 +29,8 @@ import { lensFit } from "./lenses.js";
 /**
  * @typedef {{ pos: Position, mode: Mode, pois: Poi[], lenses: Lens[],
  *   covered: ReadonlyMap<string, number>, announced: ReadonlySet<string>, areasCovered: ReadonlySet<string>,
- *   areaName: string | null, isFirst: boolean, focus: string | null }} PlanInput
+ *   areaName: string | null, isFirst: boolean, focus: string | null, blocked?: ReadonlySet<string> }} PlanInput
+ * blocked: places whose line of sight from the listener crosses another building.
  */
 
 /**
@@ -43,6 +48,10 @@ export const PROFILES = {
 export const WORDS_PER_SEC = 2.6;
 /** A place this close to coming into view counts as "now". */
 const NOW_WINDOW_SEC = 25;
+/** Places further than this off the direction you look at (degrees) are out of view: 7–8 o'clock is out. */
+export const FOV_LIMIT = 105;
+/** Right beside you: always in view, whatever the direction or buildings. */
+export const BESIDE_M = 25;
 
 /** @param {number | null} speed m/s @returns {Mode} */
 export function detectMode(speed) {
@@ -61,8 +70,11 @@ export function rankCandidates(input) {
   const out = [];
 
   for (const poi of pois) {
-    const rel = relativePosition(pos, moving ? pos.heading : null, poi);
+    // Moving: the direction of travel. Standing: where the listener faces, when known.
+    const rel = relativePosition(pos, moving ? pos.heading : pos.facing ?? null, poi);
     if (rel.distance > profile.horizon) continue;
+    // Out of the field of view (behind, or 7–8 o'clock), unless right beside you.
+    if (rel.relAngle !== null && Math.abs(rel.relAngle) > FOV_LIMIT && rel.distance > BESIDE_M) continue;
 
     let eta = null;
     let passDistance = null;
@@ -79,10 +91,13 @@ export function rankCandidates(input) {
     // Approaching, but it will never come within sight.
     if (passDistance !== null && passDistance > profile.horizon / 2 && rel.distance > profile.near) continue;
 
+    const visible = rel.distance <= BESIDE_M || !input.blocked?.has(poi.id);
     const text = `${poi.name} ${poi.wiki?.extract ?? ""} ${poi.categories.join(" ")}`;
     const proximity = 1 - rel.distance / profile.horizon;
-    const score = poi.notability + lensFit(text, lenses) + proximity;
-    out.push({ ...rel, poi, eta, passDistance, score });
+    // Prefer what's in front of you, and what you can actually see.
+    const inFront = rel.relAngle === null ? 0 : 0.4 * Math.cos((rel.relAngle * Math.PI) / 180);
+    const score = poi.notability + lensFit(text, lenses) + proximity + inFront - (visible ? 0 : 1);
+    out.push({ ...rel, poi, eta, passDistance, score, visible });
   }
   return out.sort((a, b) => b.score - a.score);
 }
@@ -90,6 +105,8 @@ export function rankCandidates(input) {
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 function isNow(c, profile) {
+  // Hidden behind buildings: it can be mentioned as nearby, but it isn't "here, look".
+  if (!c.visible) return false;
   if (c.distance <= profile.near) return true;
   return c.eta !== null && c.eta <= NOW_WINDOW_SEC && (c.passDistance ?? Infinity) <= profile.visible;
 }
@@ -152,7 +169,7 @@ export function planSegment(input) {
       (c) => c.distance <= profile.near && input.covered.get(c.poi.id) === 1 && c.poi.notability >= 2,
     );
     if (deeper) return { kind: "poi", phase: "deeper", budgetSec: profile.maxSeg, target: deeper };
-    const nearby = uncovered.find((c) => c.poi.notability >= 0.8);
+    const nearby = uncovered.find((c) => c.visible && c.poi.notability >= 0.8);
     if (nearby) return { kind: "poi", phase: "now", budgetSec: profile.maxSeg * 0.8, target: nearby };
   }
 

@@ -134,3 +134,12 @@ test("a place the listener picked is talked about next, even behind them", () =>
   assert.equal(plan.kind, "focus");
   if (plan.kind === "focus") assert.equal(plan.target?.poi.id, "Behind");
 });
+
+test("the walk's lens changes which place is picked", () => {
+  const cafe = { ...poi("Old Coffee House", 40, 5, 2), wiki: { lang: "en", title: "Old Coffee House", extract: "A historic café and bakery, famous for its pastry and coffee since 1820.", length: 4000 } };
+  const tower = { ...poi("Clock Tower", 45, -5, 2), wiki: { lang: "en", title: "Clock Tower", extract: "A medieval tower with an ornate spire and a famous view from the top, built in the 14th century.", length: 4000 } };
+  const food = planSegment(input({ pois: [cafe, tower], lenses: resolveLenses(["food"]) }));
+  const photo = planSegment(input({ pois: [cafe, tower], lenses: resolveLenses(["photo"]) }));
+  assert.equal(food.kind === "poi" && food.target.poi.id, "Old Coffee House");
+  assert.equal(photo.kind === "poi" && photo.target.poi.id, "Clock Tower");
+});

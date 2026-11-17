@@ -18,6 +18,7 @@ import { RelayError, callsToday, streamNarration } from "./relay.js";
 import { walkingRoute } from "./sources.js";
 import { SentenceBuffer, Speaker } from "./speech.js";
 import { Session, planSummary, prepareSegment } from "./tour.js";
+import { WALKS } from "./lenses.js";
 
 /* global L */
 
@@ -126,6 +127,8 @@ const state = {
   pendingFocus: null,
   /** When the last part finished playing. */
   lastEndedAt: 0,
+  /** @type {import("./lenses.js").Lens | null} the walk picked on the start screen */
+  walk: null,
   /** The sentence being spoken now, and how many of the current segment's have started. */
   sentenceNow: "",
   sentencesStarted: 0,
@@ -310,7 +313,8 @@ function abortSegments() {
 
 // ---------- Controls ----------
 
-async function start() {
+/** @param {string} lensId the walk picked on the start screen */
+async function start(lensId = "history") {
   if (!token) {
     status("Enter your access key to start.", true);
     $("key-form").hidden = false;
@@ -322,7 +326,9 @@ async function start() {
   if (!SIM && !KEYS) startCompass(); // also inside the tap: iPhone asks for permission here
   state.running = true;
   state.paused = false;
-  state.session = new Session(["history"]);
+  state.session = new Session([lensId]);
+  state.walk = WALKS.find((w) => w.id === lensId) ?? WALKS[0];
+  $("pill").textContent = state.walk.walk;
   state.pos = null;
   state.pendingFocus = null;
   showLive(true);
@@ -410,7 +416,8 @@ function stop() {
   showTarget(null);
   showLive(false);
   setSheetState("peek");
-  status("Tap Start and walk. The guide talks about what's around you.");
+  $("pill").textContent = "Guide";
+  status("Pick a walk and go. The guide talks about what's around you.");
   renderControls();
 }
 
@@ -480,7 +487,19 @@ function renderControls() {
   /** @type {HTMLButtonElement} */ ($("replay")).disabled = !playing;
 }
 
-$("start").addEventListener("click", start);
+// The walk buttons: one per lens.
+for (const [i, w] of WALKS.entries()) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = i === 0 ? "walk first" : "walk";
+  const name = document.createElement("b");
+  name.textContent = w.walk;
+  const line = document.createElement("span");
+  line.textContent = w.tagline;
+  b.append(name, line);
+  b.addEventListener("click", () => start(w.id));
+  $("walks").append(b);
+}
 $("play").addEventListener("click", () => (state.paused ? resume() : pause()));
 $("skip").addEventListener("click", skip);
 $("replay").addEventListener("click", replay);
@@ -913,7 +932,7 @@ function status(text, isError = false) {
 }
 
 function updateMeta() {
-  const parts = ["History", SIM ? `${SIM.name}${SIM_SPEED !== 1 ? ` ×${SIM_SPEED}` : ""}` : KEYS ? "Keyboard walk" : "GPS"];
+  const parts = [state.walk?.walk ?? "Historic walk", SIM ? `${SIM.name}${SIM_SPEED !== 1 ? ` ×${SIM_SPEED}` : ""}` : KEYS ? "Keyboard walk" : "GPS"];
   if (callsToday) parts.push(`${callsToday} requests today`);
   $("meta").textContent = parts.join(" · ");
 }
@@ -1056,7 +1075,7 @@ function showPrepared(prepared) {
   lastPrepared = prepared;
   lastPois = prepared.pois;
   const town = prepared.place?.town ?? prepared.place?.neighbourhood;
-  $("pill").textContent = ["History walk", town].filter(Boolean).join(" · ");
+  $("pill").textContent = [state.walk?.walk ?? "Historic walk", town].filter(Boolean).join(" · ");
   refreshPois();
   renderTopics();
   if (DEBUG) renderDebug();
@@ -1235,7 +1254,7 @@ $("key-form").addEventListener("submit", (e) => {
   token = value;
   store.set("guide.token", value);
   $("key-form").hidden = true;
-  status("Tap Start and walk. The guide talks about what's around you.");
+  status("Pick a walk and go. The guide talks about what's around you.");
 });
 
 // Offer to install: Android/desktop Chrome hand us the install prompt; iPhone needs the Share menu.
@@ -1260,4 +1279,4 @@ $("idle-keys").hidden = !KEYS;
 updateMeta();
 setSheetState("peek", false);
 renderControls();
-status(token ? "Tap Start and walk. The guide talks about what's around you." : "Enter your access key to start.", !token);
+status(token ? "Pick a walk and go. The guide talks about what's around you." : "Enter your access key to start.", !token);

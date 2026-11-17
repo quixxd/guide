@@ -104,7 +104,8 @@ export function rankCandidates(input) {
     const proximity = 1 - rel.distance / profile.horizon;
     // Prefer what's in front of you, and what you can actually see.
     const inFront = rel.relAngle === null ? 0 : 0.4 * Math.cos((rel.relAngle * Math.PI) / 180);
-    const score = poi.notability + lensFit(text, lenses) + 2 * proximity + inFront - (visible ? 0 : 1);
+    // The walk's lens weighs in strongly, so a food walk and a photo walk pick different places.
+    const score = poi.notability + 1.5 * lensFit(text, lenses) + 2 * proximity + inFront - (visible ? 0 : 1);
     out.push({ ...rel, poi, eta, passDistance, score, visible });
   }
   return out.sort((a, b) => b.score - a.score);

@@ -74,6 +74,14 @@ async function poiSource(poi, full) {
   return { title: `${poi.wiki.title} (Wikipedia, ${poi.wiki.lang})`, text: text || poi.wiki.extract };
 }
 
+/** Extra area searches for a walk's lens, e.g. the local cuisine for a food walk. */
+function lensExtras(lenses, place) {
+  const where = place?.town ?? place?.region;
+  if (!where) return [];
+  if (lenses.some((l) => l.id === "food")) return [`cuisine of ${where}`];
+  return [];
+}
+
 /** How long to wait for Wikidata facts before writing without them. */
 const FACTS_WAIT_MS = 3000;
 
@@ -87,8 +95,11 @@ async function factsSource(poi) {
   return text ? { title: `Facts about ${poi.name} (Wikidata, OpenStreetMap)`, text } : null;
 }
 
-/** @param {Exclude<Plan, { kind: "silence" }>} plan @param {Place | null} place */
-async function sourcesFor(plan, place) {
+/**
+ * @param {Exclude<Plan, { kind: "silence" }>} plan @param {Place | null} place
+ * @param {import("./lenses.js").Lens[]} lenses
+ */
+async function sourcesFor(plan, place, lenses = []) {
   /** @type {{ title: string, text: string }[]} */
   const sources = [];
   const add = async (p) => {
@@ -109,11 +120,12 @@ async function sourcesFor(plan, place) {
       else await add(search([plan.focus, place?.town].filter(Boolean).join(" ")));
       break;
     case "area":
-      await add(search(plan.areaName));
+      await Promise.all([add(search(plan.areaName)), ...lensExtras(lenses, place).map((q) => add(search(q)))]);
       break;
     case "orientation":
       await Promise.all([
         add(search([place?.neighbourhood, place?.town].filter(Boolean).join(" ") || "")),
+        ...lensExtras(lenses, place).map((q) => add(search(q))),
         ...plan.upcoming.slice(0, 2).map((c) => add(poiSource(c.poi, false))),
       ]);
       break;
@@ -193,7 +205,7 @@ export async function prepareSegment(session, pos, focus = null) {
   const prepared = { plan, mode, place, pois, ranked, areaName, buildingsKnown: !!buildings, hiddenCount: blocked.size };
   if (plan.kind === "silence") return prepared;
 
-  const sources = await sourcesFor(plan, place);
+  const sources = await sourcesFor(plan, place, session.lenses);
   prepared.system = NARRATION_SYSTEM;
   prepared.prompt = narrationPrompt(plan, {
     mode,

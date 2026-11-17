@@ -135,6 +135,34 @@ export function placeOutline(poi) {
   });
 }
 
+// ---------- Photo of an area ----------
+
+/**
+ * A photo for a segment about an area rather than one place: the lead image of the first
+ * Wikipedia article found for one of the names (street, quarter, town), tried in order. A result
+ * only counts if its title contains the name's first word, so "Am Dom, Bremen" can't come back
+ * as some unrelated article.
+ * @param {string[]} names e.g. ["Am Dom, Bremen", "Altstadt, Bremen", "Bremen"]
+ * @returns {Promise<{ url: string, link: string, credit: string } | null>}
+ */
+export function areaPhoto(names) {
+  const list = names.filter(Boolean);
+  return cached(`area-photo:${list.join("|")}`, async () => {
+    for (const name of list) {
+      const url = new URL("https://en.wikipedia.org/w/api.php");
+      for (const [k, v] of Object.entries({ action: "query", format: "json", formatversion: "2", origin: "*", generator: "search", gsrsearch: name, gsrlimit: "1", prop: "pageimages", piprop: "thumbnail", pithumbsize: "480" })) {
+        url.searchParams.set(k, v);
+      }
+      const page = (await fetchJson(url.toString())).query?.pages?.[0];
+      const key = name.split(/[ ,]/)[0].toLowerCase();
+      if (page?.thumbnail?.source && page.title.toLowerCase().includes(key)) {
+        return { url: page.thumbnail.source, link: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`, credit: "Wikipedia" };
+      }
+    }
+    return null;
+  });
+}
+
 // ---------- Photo ----------
 
 /**

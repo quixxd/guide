@@ -11,7 +11,7 @@
 // Address options: ?key=TOKEN (remembered), ?sim=bremen or ?sim=lat,lon;lat,lon (simulated walk),
 // &speed=2 (simulation speed), &debug=1 (planner details).
 
-import { placeOutline, placePhoto } from "./details.js";
+import { areaPhoto, placeOutline, placePhoto } from "./details.js";
 import { describeDistance, describeSide, relativePosition } from "./geo.js";
 import { GpsSource, KeySource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
@@ -624,7 +624,13 @@ function showSubject(prepared) {
     $("title").textContent = "Finding where you are…";
   }
   updateSubtitle();
-  showTarget(subjectPoi);
+  // No single place: show a photo of the street, quarter or town instead.
+  const pl = prepared?.place;
+  const town = pl?.town;
+  const near = (n) => (n && town && n !== town ? `${n}, ${town}` : n);
+  const areaNames = plan?.kind === "area" ? [plan.areaName, near(pl?.neighbourhood), town]
+    : plan?.kind === "orientation" ? [near(pl?.road), near(pl?.neighbourhood), town] : [];
+  showTarget(subjectPoi, areaNames);
   refit();
 }
 
@@ -888,8 +894,9 @@ function refreshPois() {
 let shownTargetId = null;
 
 /** Outlines the place on the map and shows its photo; clears both when there's no place. */
-async function showTarget(poi) {
-  const id = poi?.id ?? null;
+async function showTarget(poi, areaNames = []) {
+  const names = poi ? [] : areaNames.filter(Boolean);
+  const id = poi?.id ?? (names.length ? `area:${names.join("|")}` : null);
   if (id === shownTargetId) return;
   shownTargetId = id;
   outlineLayer.clearLayers();
@@ -897,9 +904,11 @@ async function showTarget(poi) {
   const big = /** @type {HTMLImageElement} */ ($("photo-big"));
   thumb.hidden = true;
   big.hidden = true;
-  if (!poi) return;
+  if (!id) return;
 
-  const [shapes, photo] = await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)]);
+  const [shapes, photo] = poi
+    ? await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)])
+    : [null, await areaPhoto(names).catch(() => null)];
   if (shownTargetId !== id) return; // moved on while looking up
   for (const shape of shapes ?? []) {
     // Dark orange reads well on the light topo map.
@@ -914,8 +923,9 @@ async function showTarget(poi) {
     big.onload = () => { if (shownTargetId === id) big.hidden = false; };
     thumb.src = photo.url;
     big.src = photo.url;
-    thumb.alt = poi.name;
-    big.alt = `${poi.name} (photo: ${photo.credit})`;
+    const label = poi?.name ?? names[0];
+    thumb.alt = label;
+    big.alt = `${label} (photo: ${photo.credit})`;
   }
 }
 

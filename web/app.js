@@ -29,7 +29,7 @@ const store = {
 
 const params = new URLSearchParams(location.search);
 if (params.get("key")) store.set("guide.token", params.get("key"));
-const token = params.get("key") || store.get("guide.token");
+let token = params.get("key") || store.get("guide.token");
 const DEBUG = params.has("debug");
 
 /** Simulated walks: ?sim=<name>, or ?sim=lat,lon;lat,lon[;…] */
@@ -312,7 +312,9 @@ function abortSegments() {
 
 async function start() {
   if (!token) {
-    status("Add your key to the address: …/guide/?key=YOUR_KEY", true);
+    status("Enter your access key to start.", true);
+    $("key-form").hidden = false;
+    $("key-input").focus();
     return;
   }
   speaker.unlock(); // inside the tap, so mobile browsers allow speech later
@@ -1204,8 +1206,46 @@ function renderDebug() {
 // ---------- Init ----------
 
 $("debug").hidden = !DEBUG;
+
+// ---------- Installed app (PWA) ----------
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+// No key yet: an installed app on iPhone has its own storage, separate from Safari, so the key
+// remembered from a ?key= link isn't there. Ask for it once.
+$("key-form").hidden = !!token;
+$("key-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const value = /** @type {HTMLInputElement} */ ($("key-input")).value.trim();
+  if (!value) return;
+  token = value;
+  store.set("guide.token", value);
+  $("key-form").hidden = true;
+  status("Tap Start and walk. The guide talks about what's around you.");
+});
+
+// Offer to install: Android/desktop Chrome hand us the install prompt; iPhone needs the Share menu.
+const STANDALONE = window.matchMedia("(display-mode: standalone)").matches || /** @type {any} */ (navigator).standalone === true;
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (!STANDALONE) $("install").hidden = false;
+});
+$("install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  $("install").hidden = true;
+});
+window.addEventListener("appinstalled", () => ($("install").hidden = true));
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+$("install-ios").hidden = !(IOS && !STANDALONE);
 $("idle-keys").hidden = !KEYS;
 updateMeta();
 setSheetState("peek", false);
 renderControls();
-status(token ? "Tap Start and walk. The guide talks about what's around you." : "Add your key to the address: …/guide/?key=YOUR_KEY", !token);
+status(token ? "Tap Start and walk. The guide talks about what's around you." : "Enter your access key to start.", !token);

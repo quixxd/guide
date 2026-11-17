@@ -1,7 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable",
+      "DOM.AsyncIterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowJs": true,
@@ -11,5 +16,11 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["web/**/*.js", "web/globals.d.ts"]
+  "include": [
+    "web/**/*.js",
+    "web/globals.d.ts"
+  ],
+  "exclude": [
+    "web/sw.js"
+  ]
 }

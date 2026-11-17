@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Guide</title>
+<meta name="description" content="A personal audio tour guide that talks you through the streets you walk.">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Guide">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   :root { color-scheme: light dark; --bg: #ffffff; --fg: #18181b; --muted: #61616a; --soft: #f4f4f5; --line: #d4d4d8; --dim: #a1a1aa;
@@ -46,6 +55,13 @@
   .idle h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
   .idle p { margin: 4px 0 0; color: var(--muted); }
   .idle kbd { font: 600 12px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+  .key-form { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .key-form label { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .key-row { display: flex; gap: 8px; }
+  .key-row input { flex: 1 1 auto; min-width: 0; min-height: 48px; padding: 0 12px; font: inherit; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--fg); }
+  .key-row button { min-height: 48px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--soft); font-weight: 600; }
+  .link { margin-top: 10px; border: 0; background: none; color: var(--accent); font-weight: 600; padding: 8px 0; align-self: flex-start; }
+  .hint { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
   .wide { width: 100%; min-height: 56px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-fg); font-weight: 650; font-size: 17px; margin-top: 12px; }
 
   .head { display: flex; gap: 12px; align-items: center; padding-bottom: 2px; }
@@ -175,7 +191,16 @@
       <h1>Walk with a guide</h1>
       <p id="idle-status">Tap Start and walk. The guide talks about what's around you.</p>
       <p id="idle-keys" hidden>Desktop: a simulated walk. Press Start, then walk with the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys; hold <kbd>Shift</kbd> to go faster.</p>
+      <form id="key-form" class="key-form" hidden>
+        <label for="key-input">Access key</label>
+        <div class="key-row">
+          <input id="key-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+          <button type="submit">Save</button>
+        </div>
+      </form>
       <button id="start" class="wide" type="button">Start walk</button>
+      <button id="install" class="link" type="button" hidden>Install as an app</button>
+      <p id="install-ios" class="hint" hidden>To install: tap Share, then “Add to Home Screen”.</p>
     </div>
 
     <div id="live" style="display: none;">

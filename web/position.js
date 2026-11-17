@@ -73,6 +73,116 @@ export class GpsSource {
 }
 
 /**
+ * Walk around with the arrow keys (desktop testing). Up = north, right = east, and so on;
+ * two keys walk diagonally. Shift runs (3×). The walking direction follows the keys.
+ */
+export class KeySource {
+  /**
+   * @param {{lat: number, lon: number}} start
+   * @param {(p: {lat: number, lon: number, heading: number | null, speed: number | null, accuracy: number}) => void} onPosition
+   * @param {number} multiplier speed factor (?speed=)
+   */
+  constructor(start, onPosition, multiplier = 1) {
+    this.lat = start.lat;
+    this.lon = start.lon;
+    this.onPosition = onPosition;
+    this.multiplier = multiplier;
+    this.keys = new Set();
+    /** @type {Map<string, number>} */
+    this.pressedAt = new Map();
+    this.timer = null;
+    this.paused = false;
+    /** Direction of the last movement: kept while standing, for the view cone. */
+    this.lastHeading = null;
+    this.history = [];
+    this.down = (e) => this.key(e, true);
+    this.up = (e) => this.key(e, false);
+    this.blur = () => {
+      this.keys.clear();
+      this.pressedAt.clear();
+    };
+  }
+
+  key(e, pressed) {
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Shift"].includes(e.key)) return;
+    if (e.target instanceof HTMLElement && e.target.closest("input, textarea")) return;
+    e.preventDefault();
+    if (pressed) {
+      this.keys.add(e.key);
+      this.pressedAt.set(e.key, Date.now());
+    } else {
+      this.keys.delete(e.key);
+    }
+  }
+
+  /** Held, or tapped within the last tick: a quick tap still moves you a step. */
+  isDown(key) {
+    return this.keys.has(key) || Date.now() - (this.pressedAt.get(key) ?? 0) < 150;
+  }
+
+  start() {
+    window.addEventListener("keydown", this.down);
+    window.addEventListener("keyup", this.up);
+    window.addEventListener("blur", this.blur);
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.tick(0.1), 100);
+    this.emit(0);
+  }
+
+  stop() {
+    window.removeEventListener("keydown", this.down);
+    window.removeEventListener("keyup", this.up);
+    window.removeEventListener("blur", this.blur);
+    clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  setPaused(p) {
+    this.paused = p;
+  }
+
+  tick(dt) {
+    let north = 0;
+    let east = 0;
+    if (this.isDown("ArrowUp")) north += 1;
+    if (this.isDown("ArrowDown")) north -= 1;
+    if (this.isDown("ArrowRight")) east += 1;
+    if (this.isDown("ArrowLeft")) east -= 1;
+    let speed = 0;
+    if (!this.paused && (north || east)) {
+      const len = Math.hypot(north, east);
+      speed = 1.4 * this.multiplier * (this.isDown("Shift") ? 3 : 1); // ~5 km/h walking
+      const step = speed * dt;
+      this.lat += ((north / len) * step) / 111320;
+      this.lon += ((east / len) * step) / (111320 * Math.cos(rad(this.lat)));
+      this.lastHeading = (deg(Math.atan2(east, north)) + 360) % 360;
+    }
+    // Ten updates a second while walking; once a second while standing.
+    const now = Date.now();
+    if (speed || now - (this.emittedAt ?? 0) >= 1000 || this.history.some((h) => h.v > 0)) {
+      this.emittedAt = now;
+      this.emit(speed);
+    }
+  }
+
+  emit(instant) {
+    // Like real GPS, report speed averaged over the last few seconds, so a short pause between
+    // key presses doesn't flip the guide into "standing still".
+    const now = Date.now();
+    this.history = this.history.filter((h) => now - h.t <= 3000);
+    this.history.push({ t: now, v: instant });
+    const speed = this.history.reduce((s, h) => s + h.v, 0) / this.history.length;
+    this.onPosition({
+      lat: this.lat,
+      lon: this.lon,
+      heading: speed >= 0.6 ? this.lastHeading : null,
+      speed,
+      accuracy: 5,
+    });
+  }
+}
+
+/**
  * Moves along a route at realistic speed. Bus mode is slower and stops every ~400 m.
  * route = { coords: [[lat, lon], ...], durations: [sec per segment] }
  */

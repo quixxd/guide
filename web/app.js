@@ -13,7 +13,7 @@
 
 import { placeOutline, placePhoto } from "./details.js";
 import { describeDistance, describeSide, relativePosition } from "./geo.js";
-import { GpsSource, SimSource } from "./position.js";
+import { GpsSource, KeySource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
 import { walkingRoute } from "./sources.js";
 import { SentenceBuffer, Speaker } from "./speech.js";
@@ -55,6 +55,23 @@ function simSpec() {
 const SIM = simSpec();
 const SIM_SPEED = Math.max(0.5, Math.min(10, Number(params.get("speed")) || 1));
 
+// On a desktop browser (mouse, no touch) the walk is simulated by default: arrow keys move you.
+// ?gps=1 forces real location; ?start=lat,lon picks where the keyboard walk begins.
+const DESKTOP = window.matchMedia("(hover: hover) and (pointer: fine)").matches && !("ontouchstart" in window);
+const KEYS = !SIM && DESKTOP && !params.has("gps");
+const BREMEN = { lat: 53.0757, lon: 8.8075 };
+function keyStart() {
+  const fromUrl = (params.get("start") ?? "").split(",").map(Number);
+  if (fromUrl.length === 2 && fromUrl.every(Number.isFinite)) return { lat: fromUrl[0], lon: fromUrl[1] };
+  try {
+    const saved = JSON.parse(store.get("guide.keyPos") || "null");
+    if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon)) return saved;
+  } catch {
+    // ignore a bad saved value
+  }
+  return BREMEN;
+}
+
 const GAP_AFTER_SEGMENT_MS = 1500;
 const RETRY_AFTER_ERROR_MS = 10000;
 const MAX_TOPICS = 5;
@@ -94,7 +111,7 @@ const state = {
   paused: false,
   /** @type {Session | null} */
   session: null,
-  /** @type {GpsSource | SimSource | null} */
+  /** @type {GpsSource | SimSource | KeySource | null} */
   source: null,
   /** @type {{lat: number, lon: number, heading: number | null, speed: number | null, accuracy?: number} | null} */
   pos: null,
@@ -283,7 +300,7 @@ async function start() {
   }
   speaker.unlock(); // inside the tap, so mobile browsers allow speech later
   requestWakeLock();
-  if (!SIM) startCompass(); // also inside the tap: iPhone asks for permission here
+  if (!SIM && !KEYS) startCompass(); // also inside the tap: iPhone asks for permission here
   state.running = true;
   state.paused = false;
   state.session = new Session(["history"]);
@@ -310,6 +327,12 @@ async function start() {
       status(`Couldn't plan the simulated walk: ${error.message}`, true);
       return;
     }
+  } else if (KEYS) {
+    state.source = new KeySource(keyStart(), (p) => {
+      onPosition(p);
+      store.set("guide.keyPos", JSON.stringify({ lat: p.lat, lon: p.lon }));
+    }, SIM_SPEED);
+    status("Walk with the arrow keys (Shift to go faster).");
   } else {
     state.source = new GpsSource(onPosition, (msg) => status(`Location: ${msg}`, true));
   }
@@ -321,7 +344,7 @@ function pause() {
   if (!state.running || state.paused) return;
   state.paused = true;
   abortSegments();
-  if (state.source instanceof SimSource) state.source.setPaused(true);
+  if (state.source instanceof SimSource || state.source instanceof KeySource) state.source.setPaused(true);
   status("Paused.");
   renderControls();
 }
@@ -329,7 +352,7 @@ function pause() {
 function resume() {
   if (!state.paused) return;
   state.paused = false;
-  if (state.source instanceof SimSource) state.source.setPaused(false);
+  if (state.source instanceof SimSource || state.source instanceof KeySource) state.source.setPaused(false);
   status("");
   renderControls();
   // Picks up with what's relevant where you are now, not where you paused.
@@ -416,44 +439,171 @@ window.addEventListener("online", () => {
 });
 
 // ---------- Sheet ----------
+//
+// The sheet's height is set here. Dragging the handle row (or the narration, when scrolled to
+// the top) moves it with the finger; letting go snaps it open or collapsed, by flick speed or by
+// which side of halfway it is.
+
+const sheet = $("sheet");
+const sheetBody = $("body");
+const drag = { open: false, active: false, startY: 0, startH: 0, collapsedH: 0, samples: [] };
 
 function showLive(on) {
   $("idle").style.display = on ? "none" : "";
   $("live").style.display = on ? "contents" : "none";
+  $("live-head").hidden = !on;
+  refit();
 }
 
-function setSheetOpen(open) {
-  $("sheet").classList.toggle("open", open);
+const expandedHeight = () => Math.round(window.innerHeight * 0.88);
+
+/** Height of the collapsed sheet with its current content. */
+function collapsedHeight() {
+  const wasOpen = sheet.classList.contains("open");
+  const height = sheet.style.height;
+  sheet.classList.remove("open");
+  sheet.style.height = "auto";
+  const h = sheet.offsetHeight;
+  sheet.style.height = height;
+  if (wasOpen) sheet.classList.add("open");
+  return Math.min(h, expandedHeight());
+}
+
+function setHeight(px, animate) {
+  sheet.classList.toggle("settling", animate);
+  sheet.style.height = `${Math.round(px)}px`;
+}
+
+function setSheetOpen(open, animate = true) {
+  const target = open ? expandedHeight() : collapsedHeight();
+  drag.open = open;
+  sheet.classList.toggle("open", open);
   $("grab").setAttribute("aria-expanded", String(open));
   $("grab").setAttribute("aria-label", open ? "Show less" : "Show more");
-  if (!open) $("sheet").scrollTop = 0;
+  if (!open) sheetBody.scrollTop = 0;
+  setHeight(target, animate);
   renderCaption();
 }
 
+/** Keeps the collapsed sheet fitted to its content as that changes. */
+function refit() {
+  if (!drag.open && !drag.active) setHeight(collapsedHeight(), true);
+}
+
+function beginDrag(y) {
+  drag.active = true;
+  drag.startY = y;
+  drag.startH = sheet.offsetHeight;
+  drag.collapsedH = collapsedHeight();
+  drag.samples = [{ t: performance.now(), y }];
+  sheet.classList.remove("settling");
+}
+
+function moveDrag(y) {
+  const h = Math.max(drag.collapsedH * 0.6, Math.min(expandedHeight(), drag.startH - (y - drag.startY)));
+  // Pulling up from collapsed: show the rest of the content underneath as the sheet rises.
+  if (h > drag.collapsedH + 8 && !sheet.classList.contains("open")) sheet.classList.add("open");
+  sheet.style.height = `${h}px`;
+  const now = performance.now();
+  drag.samples.push({ t: now, y });
+  while (drag.samples.length > 2 && now - drag.samples[0].t > 120) drag.samples.shift();
+}
+
+function endDrag(y) {
+  drag.active = false;
+  const first = drag.samples[0];
+  const dt = performance.now() - first.t;
+  const velocity = dt > 0 ? (y - first.y) / dt : 0; // px per ms, positive = downwards
+  const h = sheet.offsetHeight;
+  let open;
+  if (velocity < -0.35) open = true;
+  else if (velocity > 0.35) open = false;
+  else open = h > (drag.collapsedH + expandedHeight()) / 2;
+  setSheetOpen(open, true);
+}
+
+// Handle row: the grab bar and the title row (not its Play button). Works for mouse and touch.
+{
+  const zone = $("drag");
+  let pointer = null;
+  let downY = 0;
+  let lastY = 0;
+  let moved = false;
+  zone.addEventListener("pointerdown", (e) => {
+    if (/** @type {HTMLElement} */ (e.target).closest("button")) return;
+    pointer = e.pointerId;
+    downY = lastY = e.clientY;
+    moved = false;
+    zone.setPointerCapture(e.pointerId);
+  });
+  zone.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== pointer) return;
+    lastY = e.clientY;
+    if (!moved && Math.abs(e.clientY - downY) > 4) {
+      moved = true;
+      beginDrag(downY);
+    }
+    if (moved) moveDrag(e.clientY);
+  });
+  const finish = (e) => {
+    if (e.pointerId !== pointer) return;
+    pointer = null;
+    if (moved) endDrag(lastY);
+    else if (e.type === "pointerup") setSheetOpen(!drag.open);
+  };
+  zone.addEventListener("pointerup", finish);
+  zone.addEventListener("pointercancel", finish);
+  $("grab").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSheetOpen(!drag.open);
+    }
+  });
+}
+
+// The content area (touch): swipe up on the collapsed sheet to open it; when open and scrolled
+// to the top, swipe down to collapse it. Otherwise it scrolls normally.
+{
+  let start = null;
+  let dragging = false;
+  sheetBody.addEventListener("touchstart", (e) => {
+    start = e.touches.length === 1 ? e.touches[0].clientY : null;
+    dragging = false;
+  }, { passive: true });
+  sheetBody.addEventListener("touchmove", (e) => {
+    if (start === null) return;
+    const y = e.touches[0].clientY;
+    const dy = y - start;
+    if (!dragging) {
+      const pullDown = drag.open && sheetBody.scrollTop <= 0 && dy > 6;
+      const pullUp = !drag.open && dy < -6;
+      if (!pullDown && !pullUp) return;
+      dragging = true;
+      beginDrag(start);
+    }
+    e.preventDefault();
+    moveDrag(y);
+  }, { passive: false });
+  sheetBody.addEventListener("touchend", (e) => {
+    if (dragging) endDrag(e.changedTouches[0].clientY);
+    start = null;
+    dragging = false;
+  });
+}
+
+// Tap the two-line narration to read it all.
+$("caption").addEventListener("click", () => {
+  if (!drag.open) setSheetOpen(true);
+});
+
+window.addEventListener("resize", () => {
+  if (!drag.active) setSheetOpen(drag.open, false);
+});
+
 // Keep the map's attribution and controls above the sheet, whatever its height.
 new ResizeObserver(() => {
-  document.documentElement.style.setProperty("--sheet-h", `${$("sheet").offsetHeight}px`);
-}).observe($("sheet"));
-
-// Drag the handle (or tap it) to pull the sheet up or push it down.
-{
-  let startY = null;
-  const grab = $("grab");
-  grab.addEventListener("pointerdown", (e) => {
-    startY = e.clientY;
-    grab.setPointerCapture(e.pointerId);
-  });
-  grab.addEventListener("pointerup", (e) => {
-    if (startY === null) return;
-    const dy = e.clientY - startY;
-    startY = null;
-    const open = $("sheet").classList.contains("open");
-    if (Math.abs(dy) < 10) setSheetOpen(!open);
-    else if (dy < -30) setSheetOpen(true);
-    else if (dy > 30) setSheetOpen(false);
-  });
-  grab.addEventListener("pointercancel", () => (startY = null));
-}
+  document.documentElement.style.setProperty("--sheet-h", `${sheet.offsetHeight}px`);
+}).observe(sheet);
 
 // ---------- What the guide is talking about ----------
 
@@ -475,6 +625,7 @@ function showSubject(prepared) {
   }
   updateSubtitle();
   showTarget(subjectPoi);
+  refit();
 }
 
 function showQuiet() {
@@ -551,6 +702,7 @@ function renderTopics() {
     b.addEventListener("click", () => tapTopic(c.poi));
     box.append(b);
   }
+  refit();
 }
 
 // ---------- Status ----------
@@ -560,17 +712,20 @@ function status(text, isError = false) {
     $(id).textContent = text;
     $(id).classList.toggle("err", isError);
   }
+  refit();
 }
 
 function updateMeta() {
-  const parts = ["History", SIM ? `${SIM.name}${SIM_SPEED !== 1 ? ` ×${SIM_SPEED}` : ""}` : "GPS"];
+  const parts = ["History", SIM ? `${SIM.name}${SIM_SPEED !== 1 ? ` ×${SIM_SPEED}` : ""}` : KEYS ? "Keyboard walk" : "GPS"];
   if (callsToday) parts.push(`${callsToday} requests today`);
   $("meta").textContent = parts.join(" · ");
 }
 
 // ---------- Map ----------
 
-const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(SIM ? SIM.points[0] : [38.7115, -9.1365], 17);
+const initialView = SIM ? SIM.points[0] : KEYS ? [keyStart().lat, keyStart().lon] : [38.7115, -9.1365];
+// keyboard: false, so the arrow keys walk instead of panning the map.
+const map = L.map("map", { zoomControl: false, attributionControl: true, keyboard: false }).setView(initialView, 17);
 // Esri World Topo. Esri's terms expect an ArcGIS account beyond development use; fine for the prototype.
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 19,
@@ -631,6 +786,7 @@ function showPosition(p) {
 
 /** Which way the cone points: the phone's compass on a real walk, else the walking direction. */
 function viewHeading() {
+  if (state.source instanceof KeySource) return state.source.lastHeading;
   if (!SIM && compass.heading !== null && Date.now() - compass.at < 3000) return compass.heading;
   return state.pos?.heading ?? null;
 }
@@ -740,7 +896,7 @@ async function showTarget(poi) {
   const thumb = /** @type {HTMLImageElement} */ ($("photo"));
   const big = /** @type {HTMLImageElement} */ ($("photo-big"));
   thumb.hidden = true;
-  big.classList.remove("has");
+  big.hidden = true;
   if (!poi) return;
 
   const [shapes, photo] = await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)]);
@@ -755,7 +911,7 @@ async function showTarget(poi) {
   }
   if (photo) {
     thumb.onload = () => { if (shownTargetId === id) thumb.hidden = false; };
-    big.onload = () => { if (shownTargetId === id) big.classList.add("has"); };
+    big.onload = () => { if (shownTargetId === id) big.hidden = false; };
     thumb.src = photo.url;
     big.src = photo.url;
     thumb.alt = poi.name;
@@ -787,6 +943,8 @@ function renderDebug() {
 // ---------- Init ----------
 
 $("debug").hidden = !DEBUG;
+$("idle-keys").hidden = !KEYS;
 updateMeta();
+setSheetOpen(false, false);
 renderControls();
 status(token ? "Tap Start and walk. The guide talks about what's around you." : "Add your key to the address: …/guide/?key=YOUR_KEY", !token);

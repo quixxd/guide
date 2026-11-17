@@ -16,6 +16,7 @@
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
 
   #map { position: fixed; inset: 0; }
   .leaflet-control-attribution { font-size: 10px; }
@@ -29,60 +30,61 @@
   .round { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--bg); display: grid; place-items: center;
            box-shadow: 0 2px 8px rgb(0 0 0 / .22); }
 
-  /* Bottom sheet: collapsed while walking (C1), pulled up to read and look (C2). */
+  /* Bottom sheet: collapsed while walking (C1), pulled up to read and look (C2). Its height is set
+     by app.js and follows the finger while dragging; .settling animates the snap. */
   .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--bg); border-radius: 22px 22px 0 0;
-           box-shadow: 0 -6px 24px rgb(0 0 0 / .22); padding: 0 16px calc(16px + env(safe-area-inset-bottom));
-           display: flex; flex-direction: column; gap: 12px; max-height: 82vh; overflow: hidden; transition: max-height .25s ease; }
-  .sheet.open { overflow-y: auto; }
-  .grab { align-self: stretch; height: 26px; border: 0; background: transparent; display: grid; place-items: center; cursor: grab; touch-action: none; flex: 0 0 auto; }
+           box-shadow: 0 -6px 24px rgb(0 0 0 / .22); display: flex; flex-direction: column; overflow: hidden; will-change: height; }
+  .sheet.settling { transition: height .3s cubic-bezier(.2, .8, .2, 1); }
+  .drag { flex: 0 0 auto; padding: 0 16px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .drag:active { cursor: grabbing; }
+  .grab { display: grid; place-items: center; height: 26px; }
   .grab::before { content: ""; width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+  .body { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+          display: flex; flex-direction: column; gap: 12px; touch-action: none; }
+  .sheet.open .body { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 
   .idle h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
   .idle p { margin: 4px 0 0; color: var(--muted); }
+  .idle kbd { font: 600 12px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
   .wide { width: 100%; min-height: 56px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-fg); font-weight: 650; font-size: 17px; margin-top: 12px; }
 
-  .photo-big { display: none; width: 100%; height: 200px; object-fit: cover; border-radius: 16px; background: var(--photo); flex: 0 0 auto; }
-  .sheet.open .photo-big.has { display: block; }
-  .head { display: flex; gap: 12px; align-items: center; }
+  .head { display: flex; gap: 12px; align-items: center; padding-bottom: 2px; }
   .thumb { width: 64px; height: 64px; border-radius: 12px; background: var(--photo); flex: 0 0 auto; overflow: hidden; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .sheet.open .thumb { display: none; }
   .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
   .titles b { font-size: 18px; font-weight: 650; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sheet.open .titles b { font-size: 22px; white-space: normal; }
   .titles span { font-size: 13px; color: var(--muted); }
-  .titles a { color: var(--muted); }
   .play { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex: 0 0 auto; }
 
-  .progress { display: none; height: 4px; border-radius: 2px; background: var(--soft); }
+  .progress { height: 4px; border-radius: 2px; background: var(--line); flex: 0 0 auto; }
   .progress div { height: 100%; width: 0; border-radius: 2px; background: var(--accent); transition: width .3s; }
-  .sheet.open .progress { display: block; }
 
-  #caption { margin: 0; font-size: 15px; line-height: 1.45; color: var(--fg); min-height: 1.45em;
-             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .sheet.open #caption { font-size: 17px; line-height: 1.55; display: block; }
+  /* Collapsed: the sentence being spoken, two lines, tap to read everything. Open: the whole part. */
+  #caption { margin: 0; font-size: 15px; line-height: 1.45; color: var(--fg); min-height: 2.9em; flex: 0 0 auto;
+             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .sheet.open #caption { font-size: 17px; line-height: 1.6; display: block; cursor: auto; }
   #caption .said { color: var(--dim); }
   #caption .now { color: var(--fg); }
 
-  .topics-label { display: none; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: -4px; }
-  .sheet.open .topics-label { display: block; }
-  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
+  .only-open { display: none !important; }
+  .sheet.open .only-open:not([hidden]) { display: revert !important; }
+  .photo-big { width: 100%; height: 210px; object-fit: cover; border-radius: 16px; background: var(--photo); flex: 0 0 auto; }
+  .topics-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: -4px; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; touch-action: pan-x; }
   .chips::-webkit-scrollbar { display: none; }
   .sheet.open .chips { flex-wrap: wrap; overflow: visible; }
   .chip { flex: 0 0 auto; min-height: 44px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); font-size: 14px; font-weight: 500; }
   .chip.queued { border-color: var(--accent); color: var(--accent); }
 
-  .controls { display: none; align-items: center; justify-content: space-between; padding: 4px 6px 0; }
-  .sheet.open .controls { display: flex; }
+  .controls { align-items: center; justify-content: space-between; padding: 4px 6px 0; }
+  .sheet.open .controls.only-open:not([hidden]) { display: flex !important; }
   .ctl { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--soft); display: grid; place-items: center; }
   .ctl:disabled { opacity: .35; }
 
-  #status { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.2em; }
+  #status { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.2em; flex: 0 0 auto; }
   #status.err { color: var(--err); }
-  #meta { display: none; margin: 0; font-size: 12px; color: var(--muted); }
-  .sheet.open #meta { display: block; }
+  #meta { margin: 0; font-size: 12px; color: var(--muted); }
   #debug { margin: 0; font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; color: var(--muted); }
-  .sheet:not(.open) #debug { display: none; }
 
   /* The "you are here" marker: dot plus a fading view cone, as in Google Maps. */
   .me-icon { background: none; border: 0; }
@@ -100,17 +102,9 @@
 </div>
 
 <section id="sheet" class="sheet" aria-label="Guide">
-  <button id="grab" class="grab" type="button" aria-label="Show more" aria-expanded="false"></button>
-
-  <div id="idle" class="idle">
-    <h1>Walk with a guide</h1>
-    <p id="idle-status">Tap Start and walk. The guide talks about what's around you.</p>
-    <button id="start" class="wide" type="button">Start walk</button>
-  </div>
-
-  <div id="live" style="display: none;">
-    <img id="photo-big" class="photo-big" alt="">
-    <div class="head">
+  <div id="drag" class="drag">
+    <div id="grab" class="grab" role="button" tabindex="0" aria-label="Show more" aria-expanded="false"></div>
+    <div id="live-head" class="head" hidden>
       <div class="thumb"><img id="photo" alt="" hidden></div>
       <div class="titles">
         <b id="title">Finding where you are…</b>
@@ -118,24 +112,37 @@
       </div>
       <button id="play" class="play" type="button" aria-label="Pause"></button>
     </div>
-    <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
-    <p id="caption"></p>
-    <span class="topics-label">Hear more about</span>
-    <div id="chips" class="chips"></div>
-    <div class="controls">
-      <button id="replay" class="ctl" type="button" aria-label="Replay this part">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>
-      </button>
-      <button id="skip" class="ctl" type="button" aria-label="Skip">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l9 7-9 7z"></path><path d="M19 5v14"></path></svg>
-      </button>
-      <button id="stop" class="ctl" type="button" aria-label="End the walk">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
-      </button>
+  </div>
+
+  <div id="body" class="body">
+    <div id="idle" class="idle">
+      <h1>Walk with a guide</h1>
+      <p id="idle-status">Tap Start and walk. The guide talks about what's around you.</p>
+      <p id="idle-keys" hidden>Desktop: a simulated walk. Press Start, then walk with the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys; hold <kbd>Shift</kbd> to go faster.</p>
+      <button id="start" class="wide" type="button">Start walk</button>
     </div>
-    <p id="status"></p>
-    <p id="meta"></p>
-    <pre id="debug" hidden></pre>
+
+    <div id="live" style="display: none;">
+      <div class="progress only-open" aria-hidden="true"><div id="progress-bar"></div></div>
+      <p id="caption" title="Tap to read it all"></p>
+      <img id="photo-big" class="photo-big only-open" alt="" hidden>
+      <span class="topics-label only-open">Hear more about</span>
+      <div id="chips" class="chips"></div>
+      <div class="controls only-open">
+        <button id="replay" class="ctl" type="button" aria-label="Replay this part">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>
+        </button>
+        <button id="skip" class="ctl" type="button" aria-label="Skip">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l9 7-9 7z"></path><path d="M19 5v14"></path></svg>
+        </button>
+        <button id="stop" class="ctl" type="button" aria-label="End the walk">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+        </button>
+      </div>
+      <p id="status"></p>
+      <p id="meta" class="only-open"></p>
+      <pre id="debug" class="only-open" hidden></pre>
+    </div>
   </div>
 </section>
 

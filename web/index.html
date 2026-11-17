@@ -7,6 +7,7 @@
 <meta name="description" content="A personal audio tour guide that talks you through the streets you walk.">
 <meta name="theme-color" content="#2563eb">
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/logo.svg" type="image/svg+xml">
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -52,6 +53,8 @@
           display: flex; flex-direction: column; gap: 12px; touch-action: none; }
   .sheet.open .body { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img { border-radius: 11px; flex: 0 0 auto; }
   .idle h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
   .idle p { margin: 4px 0 0; color: var(--muted); }
   .idle kbd { font: 600 12px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
@@ -202,7 +205,7 @@
 
   <div id="body" class="body">
     <div id="idle" class="idle">
-      <h1>Walk with a guide</h1>
+      <div class="brand"><img src="icons/logo.svg" alt="" width="48" height="48"><h1>Walk with a guide</h1></div>
       <p id="idle-status">Pick a walk and go. The guide talks about what's around you.</p>
       <p id="idle-keys" hidden>Desktop: a simulated walk. Pick a walk, then move with the <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> keys; hold <kbd>Shift</kbd> to go faster.</p>
       <form id="key-form" class="key-form" hidden>

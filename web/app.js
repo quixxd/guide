@@ -4,10 +4,15 @@
 // relay, speak it sentence by sentence. While the last sentence plays, the next segment is
 // prepared, so there's no long silence between segments.
 //
-// Address options: ?key=TOKEN (remembered), ?sim=baixa or ?sim=lat,lon;lat,lon (simulated walk),
+// Screen (layout C1/C2): a full-screen map with a bottom sheet. Collapsed while walking: photo,
+// name, where it is, the current sentence, topic buttons and Play/Pause. Pulled up: big photo,
+// the whole narration, all topics, and replay / skip / stop.
+//
+// Address options: ?key=TOKEN (remembered), ?sim=bremen or ?sim=lat,lon;lat,lon (simulated walk),
 // &speed=2 (simulation speed), &debug=1 (planner details).
 
 import { placeOutline, placePhoto } from "./details.js";
+import { describeDistance, describeSide, relativePosition } from "./geo.js";
 import { GpsSource, SimSource } from "./position.js";
 import { RelayError, callsToday, streamNarration } from "./relay.js";
 import { walkingRoute } from "./sources.js";
@@ -52,16 +57,19 @@ const SIM_SPEED = Math.max(0.5, Math.min(10, Number(params.get("speed")) || 1));
 
 const GAP_AFTER_SEGMENT_MS = 1500;
 const RETRY_AFTER_ERROR_MS = 10000;
+const MAX_TOPICS = 5;
 
 const speaker = new Speaker();
 
 class Segment {
-  constructor() {
+  constructor(focus) {
     this.ctl = new AbortController();
+    this.focus = focus;
     this.sentences = new SentenceBuffer();
     /** Sentences waiting until this segment becomes the one being spoken. */
     this.pending = [];
     this.text = "";
+    this.sentenceCount = 0;
     this.active = false;
     this.streamDone = false;
     this.recorded = false;
@@ -75,6 +83,7 @@ class Segment {
   }
 
   push(sentence) {
+    this.sentenceCount++;
     if (this.active) speaker.enqueue(sentence);
     else this.pending.push(sentence);
   }
@@ -93,9 +102,13 @@ const state = {
   current: null,
   /** @type {Segment | null} the segment being prepared while the current one finishes */
   next: null,
+  /** A place the listener tapped: the next segment is about it. */
+  pendingFocus: null,
+  /** The sentence being spoken now, and how many of the current segment's have started. */
+  sentenceNow: "",
+  sentencesStarted: 0,
   timer: 0,
   wakeLock: null,
-  simRoute: null,
 };
 
 // ---------- Segments ----------
@@ -114,13 +127,14 @@ function startNext() {
     schedule(2000);
     return;
   }
-  const seg = new Segment();
+  const seg = new Segment(state.pendingFocus);
+  state.pendingFocus = null;
   if (state.current) {
     state.next = seg;
   } else {
     state.current = seg;
     seg.active = true;
-    status(state.session.segments.length ? "Looking around…" : "Finding where you are…");
+    status(seg.focus ? `Turning to ${seg.focus}…` : state.session.segments.length ? "Looking around…" : "Finding where you are…");
   }
   run(seg);
 }
@@ -128,7 +142,7 @@ function startNext() {
 /** @param {Segment} seg */
 async function run(seg) {
   try {
-    const prepared = await prepareSegment(state.session, { ...state.pos }, null);
+    const prepared = await prepareSegment(state.session, { ...state.pos }, seg.focus);
     if (seg.ctl.signal.aborted) return;
     seg.prepared = prepared;
     showPrepared(prepared);
@@ -146,6 +160,7 @@ async function run(seg) {
       await streamNarration(token, prepared.system, prepared.prompt, (t) => {
         seg.text += t;
         for (const s of seg.sentences.push(t)) seg.push(s);
+        if (seg.active) renderCaption();
       }, seg.ctl.signal);
       for (const s of seg.sentences.flush()) seg.push(s);
     }
@@ -158,16 +173,18 @@ async function run(seg) {
   settle(seg);
 }
 
-/** Marks the segment's place as covered once it starts playing. @param {Segment} seg */
+/** Marks the segment's place as covered once it starts playing, and shows it. @param {Segment} seg */
 function record(seg) {
   if (seg.recorded || !seg.prepared || seg.silence) return;
   seg.recorded = true;
   state.session.record(seg.prepared);
-  const plan = seg.prepared.plan;
-  const target = targetOf(plan);
-  status(target ? `Talking about ${target.name}` : plan.kind === "area" ? `Talking about ${plan.areaName}` : "Speaking");
+  state.sentenceNow = "";
+  state.sentencesStarted = 0;
+  status("");
   refreshPois();
-  showTarget(target);
+  showSubject(seg.prepared);
+  renderTopics();
+  renderCaption();
 }
 
 /** The place a plan is about, if any. @param {import("./planner.js").Plan} plan */
@@ -199,10 +216,11 @@ function settle(seg) {
   }
   if (seg.silence) {
     state.current = null;
-    status("Quiet stretch: I'll speak up when there's something to tell.");
+    showQuiet();
     schedule(seg.retryMs);
     return;
   }
+  renderCaption();
   if (!speaker.busy) segmentEnded();
   // Speech is already on the last sentence: prepare the next segment now.
   else if (speaker.queue.length === 0 && !state.next) startNext();
@@ -220,7 +238,9 @@ function segmentEnded() {
 }
 
 speaker.onSentence = (text) => {
-  $("caption").textContent = text;
+  state.sentenceNow = text;
+  state.sentencesStarted++;
+  renderCaption();
   // The last sentence of a complete segment has started: prepare the next one now.
   const cur = state.current;
   if (cur && cur.streamDone && speaker.queue.length === 0 && !state.next) startNext();
@@ -235,7 +255,7 @@ function handleError(error) {
   const statusCode = error instanceof RelayError ? error.status : 0;
   if (statusCode === 429) {
     pause();
-    status("The free daily quota is used up (or the relay's limit is reached). Try again later, or tap Continue.", true);
+    status("The free daily quota is used up (or the relay's limit is reached). Try again later, or tap Play.", true);
   } else if (statusCode === 401) {
     pause();
     status("Wrong or missing key: open the page as …/guide/?key=YOUR_KEY", true);
@@ -263,15 +283,20 @@ async function start() {
   }
   speaker.unlock(); // inside the tap, so mobile browsers allow speech later
   requestWakeLock();
+  if (!SIM) startCompass(); // also inside the tap: iPhone asks for permission here
   state.running = true;
   state.paused = false;
   state.session = new Session(["history"]);
   state.pos = null;
+  state.pendingFocus = null;
+  showLive(true);
+  showSubject(null);
   renderControls();
 
   const onPosition = (p) => {
     state.pos = p;
     showPosition(p);
+    updateSubtitle();
   };
   if (SIM) {
     try {
@@ -305,6 +330,7 @@ function resume() {
   if (!state.paused) return;
   state.paused = false;
   if (state.source instanceof SimSource) state.source.setPaused(false);
+  status("");
   renderControls();
   // Picks up with what's relevant where you are now, not where you paused.
   startNext();
@@ -316,6 +342,17 @@ function skip() {
   startNext();
 }
 
+/** Plays the current part again from its first sentence. */
+function replay() {
+  const cur = state.current;
+  if (!cur || !cur.streamDone || !cur.text.trim()) return;
+  speaker.cancel();
+  state.sentenceNow = "";
+  state.sentencesStarted = 0;
+  const buf = new SentenceBuffer();
+  for (const s of [...buf.push(cur.text), ...buf.flush()]) speaker.enqueue(s);
+}
+
 function stop() {
   state.running = false;
   state.paused = false;
@@ -324,20 +361,44 @@ function stop() {
   state.source = null;
   state.wakeLock?.release().catch(() => {});
   state.wakeLock = null;
-  $("caption").textContent = "";
+  stopCompass();
   showTarget(null);
+  showLive(false);
+  setSheetOpen(false);
   status("Tap Start and walk. The guide talks about what's around you.");
   renderControls();
 }
 
-function renderControls() {
-  $("main").textContent = !state.running ? "Start" : state.paused ? "Continue" : "Pause";
-  /** @type {HTMLButtonElement} */ ($("skip")).disabled = !state.running || state.paused;
-  /** @type {HTMLButtonElement} */ ($("stop")).disabled = !state.running;
+/** A tapped topic becomes the next segment, after the current one finishes. */
+function tapTopic(poi) {
+  if (!state.running) return;
+  state.pendingFocus = poi.name;
+  renderTopics();
+  status(`Next: ${poi.name}`);
+  if (state.next) {
+    state.next.ctl.abort();
+    state.next = null;
+  }
+  if (state.paused) resume();
+  else if (!state.current) startNext();
+  else if (state.current.streamDone && speaker.queue.length === 0) startNext();
 }
 
-$("main").addEventListener("click", () => (!state.running ? start() : state.paused ? resume() : pause()));
+const ICON_PAUSE = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
+const ICON_PLAY = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"></path></svg>';
+
+function renderControls() {
+  const playing = state.running && !state.paused;
+  $("play").innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  $("play").setAttribute("aria-label", playing ? "Pause" : "Play");
+  /** @type {HTMLButtonElement} */ ($("skip")).disabled = !playing;
+  /** @type {HTMLButtonElement} */ ($("replay")).disabled = !playing;
+}
+
+$("start").addEventListener("click", start);
+$("play").addEventListener("click", () => (state.paused ? resume() : pause()));
 $("skip").addEventListener("click", skip);
+$("replay").addEventListener("click", replay);
 $("stop").addEventListener("click", stop);
 
 async function requestWakeLock() {
@@ -354,11 +415,151 @@ window.addEventListener("online", () => {
   if (state.running && !state.paused && !state.current) startNext();
 });
 
+// ---------- Sheet ----------
+
+function showLive(on) {
+  $("idle").style.display = on ? "none" : "";
+  $("live").style.display = on ? "contents" : "none";
+}
+
+function setSheetOpen(open) {
+  $("sheet").classList.toggle("open", open);
+  $("grab").setAttribute("aria-expanded", String(open));
+  $("grab").setAttribute("aria-label", open ? "Show less" : "Show more");
+  if (!open) $("sheet").scrollTop = 0;
+  renderCaption();
+}
+
+// Keep the map's attribution and controls above the sheet, whatever its height.
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty("--sheet-h", `${$("sheet").offsetHeight}px`);
+}).observe($("sheet"));
+
+// Drag the handle (or tap it) to pull the sheet up or push it down.
+{
+  let startY = null;
+  const grab = $("grab");
+  grab.addEventListener("pointerdown", (e) => {
+    startY = e.clientY;
+    grab.setPointerCapture(e.pointerId);
+  });
+  grab.addEventListener("pointerup", (e) => {
+    if (startY === null) return;
+    const dy = e.clientY - startY;
+    startY = null;
+    const open = $("sheet").classList.contains("open");
+    if (Math.abs(dy) < 10) setSheetOpen(!open);
+    else if (dy < -30) setSheetOpen(true);
+    else if (dy > 30) setSheetOpen(false);
+  });
+  grab.addEventListener("pointercancel", () => (startY = null));
+}
+
+// ---------- What the guide is talking about ----------
+
+/** @type {import("./planner.js").Poi | null} */
+let subjectPoi = null;
+
+/** Title, subtitle, photo and outline for the segment that just started. @param {import("./tour.js").Prepared | null} prepared */
+function showSubject(prepared) {
+  const plan = prepared?.plan;
+  subjectPoi = plan ? targetOf(plan) : null;
+  if (subjectPoi) {
+    $("title").textContent = subjectPoi.name;
+  } else if (plan?.kind === "area") {
+    $("title").textContent = plan.areaName;
+  } else if (plan?.kind === "orientation") {
+    $("title").textContent = prepared.place?.road ?? prepared.place?.town ?? "Where you are";
+  } else {
+    $("title").textContent = "Finding where you are…";
+  }
+  updateSubtitle();
+  showTarget(subjectPoi);
+}
+
+function showQuiet() {
+  subjectPoi = null;
+  $("title").textContent = "Quiet stretch";
+  $("sub").textContent = "I'll speak up when there's something to tell.";
+  $("caption").textContent = "";
+  showTarget(null);
+}
+
+/** "On your right · 60 m", kept up to date as you walk. */
+function updateSubtitle() {
+  const plan = state.current?.prepared?.plan;
+  if (subjectPoi && state.pos) {
+    const rel = relativePosition(state.pos, state.pos.heading, subjectPoi);
+    const side = describeSide(rel);
+    $("sub").textContent = `${side.charAt(0).toUpperCase()}${side.slice(1)} · ${describeDistance(rel.distance)}`;
+  } else if (plan?.kind === "area") {
+    $("sub").textContent = "The area around you";
+  } else if (plan?.kind === "orientation") {
+    $("sub").textContent = "Getting your bearings";
+  }
+}
+
+/** Collapsed: the sentence being spoken. Pulled up: the whole part, said / now / still to come. */
+function renderCaption() {
+  const cur = state.current;
+  const text = cur?.text.trim() ?? "";
+  const now = state.sentenceNow;
+  const box = $("caption");
+  const open = $("sheet").classList.contains("open");
+  const total = cur?.streamDone ? cur.sentenceCount : Math.max(cur?.sentenceCount ?? 0, state.sentencesStarted + 1);
+  $("progress-bar").style.width = `${total ? Math.min(100, (state.sentencesStarted / total) * 100) : 0}%`;
+  if (!open) {
+    box.textContent = now || "";
+    return;
+  }
+  const at = now ? text.indexOf(now) : -1;
+  box.textContent = "";
+  if (at < 0) {
+    box.textContent = text;
+    return;
+  }
+  const said = document.createElement("span");
+  said.className = "said";
+  said.textContent = text.slice(0, at);
+  const current = document.createElement("span");
+  current.className = "now";
+  current.textContent = now;
+  const rest = document.createElement("span");
+  rest.className = "said";
+  rest.textContent = text.slice(at + now.length);
+  box.append(said, current, rest);
+}
+
+/** Topic buttons: notable places around you that haven't been covered yet. */
+function renderTopics() {
+  const box = $("chips");
+  box.textContent = "";
+  const ranked = lastPrepared?.ranked ?? [];
+  const seen = new Set();
+  const picks = ranked.filter((c) => {
+    if (c.poi.id === subjectPoi?.id || state.session?.covered.has(c.poi.id) || c.poi.notability < 0.8) return false;
+    if (c.poi.categories.includes("area") || seen.has(c.poi.name)) return false;
+    seen.add(c.poi.name);
+    return true;
+  }).slice(0, MAX_TOPICS);
+  for (const c of picks) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    if (state.pendingFocus === c.poi.name) b.classList.add("queued");
+    b.textContent = c.poi.name;
+    b.addEventListener("click", () => tapTopic(c.poi));
+    box.append(b);
+  }
+}
+
 // ---------- Status ----------
 
 function status(text, isError = false) {
-  $("status").textContent = text;
-  $("status").classList.toggle("err", isError);
+  for (const id of ["status", "idle-status"]) {
+    $(id).textContent = text;
+    $(id).classList.toggle("err", isError);
+  }
 }
 
 function updateMeta() {
@@ -370,43 +571,128 @@ function updateMeta() {
 // ---------- Map ----------
 
 const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(SIM ? SIM.points[0] : [38.7115, -9.1365], 17);
-// Satellite imagery. Esri's terms expect an ArcGIS account beyond development use; fine for the prototype.
-L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+// Esri World Topo. Esri's terms expect an ArcGIS account beyond development use; fine for the prototype.
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 19,
-  attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics | Places &copy; OpenStreetMap contributors, Wikipedia",
+  attribution: "Tiles &copy; Esri and contributors | Places &copy; OpenStreetMap contributors, Wikipedia",
 }).addTo(map);
 const outlineLayer = L.layerGroup().addTo(map);
 const poiLayer = L.layerGroup().addTo(map);
-let meMarker = null;
-let headingLine = null;
 let routeLine = null;
 let followUntil = 0;
 let lastPois = [];
 map.on("dragstart", () => (followUntil = Date.now() + 20000));
+$("recentre").addEventListener("click", () => {
+  followUntil = 0;
+  if (state.pos) map.setView([state.pos.lat, state.pos.lon], Math.max(map.getZoom(), 17));
+});
+
+// "You are here": a blue dot with a fading view cone (Google Maps style) and an accuracy circle.
+const ME_ICON = L.divIcon({
+  className: "me-icon",
+  iconSize: [120, 120],
+  iconAnchor: [60, 60],
+  html: `<svg width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
+    <defs><radialGradient id="me-cone" cx="60" cy="60" r="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4285f4" stop-opacity="0.6"></stop>
+      <stop offset="1" stop-color="#4285f4" stop-opacity="0"></stop>
+    </radialGradient></defs>
+    <g class="cone" style="display:none"><path d="M60 60 L27.88 14.13 A56 56 0 0 1 92.12 14.13 Z" fill="url(#me-cone)"></path></g>
+    <circle cx="60" cy="60" r="11" fill="#ffffff"></circle>
+    <circle cx="60" cy="60" r="8" fill="#4285f4"></circle>
+  </svg>`,
+});
+let meMarker = null;
+let accuracyCircle = null;
 
 function showPosition(p) {
   const ll = [p.lat, p.lon];
   if (!meMarker) {
-    meMarker = L.circleMarker(ll, { radius: 8, color: "#fff", weight: 2, fillColor: "#1f6fd1", fillOpacity: 1 }).addTo(map);
+    meMarker = L.marker(ll, { icon: ME_ICON, interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
     map.setView(ll, 17);
   } else {
     meMarker.setLatLng(ll);
   }
-  headingLine?.remove();
-  headingLine = null;
-  if (p.heading !== null) {
-    const d = 0.0005;
-    const rad = (p.heading * Math.PI) / 180;
-    const end = [p.lat + d * Math.cos(rad), p.lon + (d * Math.sin(rad)) / Math.cos((p.lat * Math.PI) / 180)];
-    headingLine = L.polyline([ll, end], { color: "#1f6fd1", weight: 3 }).addTo(map);
+  const acc = p.accuracy ?? 0;
+  if (acc > 15) {
+    if (!accuracyCircle) {
+      accuracyCircle = L.circle(ll, { radius: acc, stroke: false, fillColor: "#4285f4", fillOpacity: 0.12, interactive: false }).addTo(map);
+    } else {
+      accuracyCircle.setLatLng(ll).setRadius(acc);
+    }
+  } else {
+    accuracyCircle?.remove();
+    accuracyCircle = null;
   }
+  updateCone();
   if (Date.now() > followUntil) map.panTo(ll, { animate: false });
   if (DEBUG) renderDebug();
 }
 
+/** Which way the cone points: the phone's compass on a real walk, else the walking direction. */
+function viewHeading() {
+  if (!SIM && compass.heading !== null && Date.now() - compass.at < 3000) return compass.heading;
+  return state.pos?.heading ?? null;
+}
+
+let coneTurns = 0;
+let coneLast = null;
+function updateCone() {
+  const cone = meMarker?.getElement()?.querySelector(".cone");
+  if (!cone) return;
+  const h = viewHeading();
+  if (h === null) {
+    cone.style.display = "none";
+    return;
+  }
+  // Keep rotation continuous across north, so the cone doesn't spin the long way round.
+  if (coneLast !== null) {
+    const d = ((h - coneLast + 540) % 360) - 180;
+    coneTurns += d;
+  } else {
+    coneTurns = h;
+  }
+  coneLast = h;
+  cone.style.display = "";
+  cone.style.transform = `rotate(${coneTurns}deg)`;
+}
+
+// Compass (device orientation). Smoothed; iPhone needs permission from a tap.
+const compass = { heading: null, at: 0, listening: false };
+/** @param {any} e DeviceOrientationEvent (webkitCompassHeading on iPhone) */
+function onOrientation(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;
+  else if (e.absolute && e.alpha !== null) h = (360 - e.alpha) % 360;
+  if (h === null || Number.isNaN(h)) return;
+  h = (h + (screen.orientation?.angle ?? 0) + 360) % 360;
+  if (compass.heading === null) compass.heading = h;
+  else compass.heading = (compass.heading + (((h - compass.heading + 540) % 360) - 180) * 0.25 + 360) % 360;
+  compass.at = Date.now();
+  requestAnimationFrame(updateCone);
+}
+const ORIENTATION_EVENT = "ondeviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation";
+function startCompass() {
+  const listen = () => {
+    window.addEventListener(ORIENTATION_EVENT, onOrientation);
+    compass.listening = true;
+  };
+  const DOE = /** @type {any} */ (window).DeviceOrientationEvent;
+  if (DOE && typeof DOE.requestPermission === "function") {
+    DOE.requestPermission().then((r) => r === "granted" && listen()).catch(() => {});
+  } else {
+    listen();
+  }
+}
+function stopCompass() {
+  if (compass.listening) window.removeEventListener(ORIENTATION_EVENT, onOrientation);
+  compass.listening = false;
+  compass.heading = null;
+}
+
 function showRoute(coords) {
   routeLine?.remove();
-  routeLine = L.polyline(coords, { color: "#1f6fd1", weight: 4, opacity: 0.35 }).addTo(map);
+  routeLine = L.polyline(coords, { color: "#2563eb", weight: 5, opacity: 0.35 }).addTo(map);
 }
 
 let lastPrepared = null;
@@ -415,26 +701,28 @@ let lastPrepared = null;
 function showPrepared(prepared) {
   lastPrepared = prepared;
   lastPois = prepared.pois;
-  if (prepared.place?.label) $("place").textContent = prepared.place.label.split(", ").slice(0, 3).join(", ");
+  const town = prepared.place?.town ?? prepared.place?.neighbourhood;
+  $("pill").textContent = ["History walk", town].filter(Boolean).join(" · ");
   refreshPois();
+  renderTopics();
   if (DEBUG) renderDebug();
 }
 
 function refreshPois() {
   poiLayer.clearLayers();
-  const plan = state.current?.prepared?.plan;
-  const targetId = plan && "target" in plan && plan.target ? plan.target.poi.id : null;
+  const targetId = subjectPoi?.id ?? null;
   for (const p of lastPois.slice(0, 150)) {
     const covered = state.session?.covered.has(p.id);
     const isTarget = p.id === targetId;
     L.circleMarker([p.lat, p.lon], {
-      radius: isTarget ? 9 : 5,
-      color: isTarget ? "#fff" : covered ? "#8a8f98" : "#c2621f",
-      weight: isTarget ? 2 : 1,
-      fillColor: isTarget ? "#e0731f" : covered ? "#8a8f98" : "#c2621f",
-      fillOpacity: covered && !isTarget ? 0.5 : 0.9,
+      radius: isTarget ? 9 : 6,
+      color: "#ffffff",
+      weight: 1.5,
+      fillColor: isTarget ? "#c2410c" : covered ? "#8a8f98" : "#ea7a2e",
+      fillOpacity: covered && !isTarget ? 0.7 : 1,
     })
       .bindTooltip(p.name)
+      .on("click", () => tapTopic(p))
       .addTo(poiLayer);
   }
 }
@@ -443,48 +731,37 @@ function refreshPois() {
 
 let shownTargetId = null;
 
-/** Outlines the place on the map and shows its photo card; clears both when there's no place. */
+/** Outlines the place on the map and shows its photo; clears both when there's no place. */
 async function showTarget(poi) {
   const id = poi?.id ?? null;
   if (id === shownTargetId) return;
   shownTargetId = id;
   outlineLayer.clearLayers();
-  $("now").hidden = true;
+  const thumb = /** @type {HTMLImageElement} */ ($("photo"));
+  const big = /** @type {HTMLImageElement} */ ($("photo-big"));
+  thumb.hidden = true;
+  big.classList.remove("has");
   if (!poi) return;
-
-  $("now-name").textContent = poi.name;
-  $("now-photo").hidden = true;
-  $("now-credit").textContent = "";
-  $("now").hidden = false;
 
   const [shapes, photo] = await Promise.all([placeOutline(poi).catch(() => null), placePhoto(poi).catch(() => null)]);
   if (shownTargetId !== id) return; // moved on while looking up
   for (const shape of shapes ?? []) {
+    // Dark orange reads well on the light topo map.
     if (shape.kind === "polygon") {
-      L.polygon(shape.coords, { color: "#ffd23f", weight: 3, fillColor: "#ffd23f", fillOpacity: 0.18 }).addTo(outlineLayer);
+      L.polygon(shape.coords, { color: "#c2410c", weight: 3, fillColor: "#f97316", fillOpacity: 0.2 }).addTo(outlineLayer);
     } else {
-      L.polyline(shape.coords, { color: "#ffd23f", weight: 6, opacity: 0.85 }).addTo(outlineLayer);
+      L.polyline(shape.coords, { color: "#c2410c", weight: 6, opacity: 0.8 }).addTo(outlineLayer);
     }
   }
   if (photo) {
-    const img = /** @type {HTMLImageElement} */ ($("now-photo"));
-    img.onload = () => { if (shownTargetId === id) img.hidden = false; };
-    img.src = photo.url;
-    img.alt = poi.name;
-    const credit = /** @type {HTMLAnchorElement} */ ($("now-credit"));
-    credit.textContent = `Photo: ${photo.credit}`;
-    credit.href = photo.link;
+    thumb.onload = () => { if (shownTargetId === id) thumb.hidden = false; };
+    big.onload = () => { if (shownTargetId === id) big.classList.add("has"); };
+    thumb.src = photo.url;
+    big.src = photo.url;
+    thumb.alt = poi.name;
+    big.alt = `${poi.name} (photo: ${photo.credit})`;
   }
 }
-
-$("now").addEventListener("click", (e) => {
-  if (/** @type {HTMLElement} */ (e.target).closest("a")) return;
-  const plan = state.current?.prepared?.plan;
-  const poi = plan ? targetOf(plan) : null;
-  if (!poi) return;
-  followUntil = Date.now() + 20000;
-  map.setView([poi.lat, poi.lon], Math.max(map.getZoom(), 18));
-});
 
 // ---------- Debug ----------
 
@@ -493,7 +770,7 @@ function renderDebug() {
   const lines = [];
   if (p) {
     lines.push(`pos ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} ±${Math.round(p.accuracy ?? 0)} m`);
-    lines.push(`speed ${p.speed === null ? "?" : (p.speed * 3.6).toFixed(1)} km/h, heading ${p.heading === null ? "?" : Math.round(p.heading)}°`);
+    lines.push(`speed ${p.speed === null ? "?" : (p.speed * 3.6).toFixed(1)} km/h, heading ${p.heading === null ? "?" : Math.round(p.heading)}°, compass ${compass.heading === null ? "-" : Math.round(compass.heading)}°`);
   }
   lines.push(`current ${state.current ? (state.current.streamDone ? "done" : "streaming") : "-"}, next ${state.next ? (state.next.streamDone ? "ready" : "preparing") : "-"}`);
   if (lastPrepared) {

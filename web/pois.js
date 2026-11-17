@@ -96,7 +96,9 @@ export function mergePois(wikiPages, osm) {
   const byId = new Map();
 
   // English first, so it wins when the same Wikidata item exists in both languages.
-  const sorted = [...wikiPages].sort((a, b) => (a.lang === "en" ? -1 : 0) - (b.lang === "en" ? -1 : 0));
+  // Overview and list articles ("Timeline of Bremen", "Liste der …") carry coordinates but aren't places.
+  const isOverview = (p) => /^(timeline|list|lists|history|outline|index|geography|demographics|culture) of\b|^liste\b|^lista\b|^chronolog/i.test(p.title);
+  const sorted = [...wikiPages].filter((p) => !isOverview(p)).sort((a, b) => (a.lang === "en" ? -1 : 0) - (b.lang === "en" ? -1 : 0));
   for (const page of sorted) {
     const poi = fromWiki(page);
     const existing = byId.get(poi.id);

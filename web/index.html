@@ -6,54 +6,139 @@
 <title>Guide</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-  :root { color-scheme: light dark; --bg: #faf9f7; --fg: #1c1b19; --muted: #6b6862; --line: #e2dfd9; --accent: #1f6fd1; --accent-fg: #fff; --err: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #141414; --fg: #ececec; --muted: #9a978f; --line: #2c2b29; --accent: #4f9cf0; --accent-fg: #08111c; --err: #f2766d; } }
+  :root { color-scheme: light dark; --bg: #ffffff; --fg: #18181b; --muted: #61616a; --soft: #f4f4f5; --line: #d4d4d8; --dim: #a1a1aa;
+          --accent: #2563eb; --accent-fg: #ffffff; --chip: #ffffff; --err: #b3261e; --photo: #e4e1da; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --soft: #27272a; --line: #3f3f46; --dim: #71717a;
+            --accent: #4f8ff7; --accent-fg: #0b1220; --chip: #18181b; --err: #f2766d; --photo: #3f3f46; }
+  }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body { background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
-  #map-wrap { flex: 1 1 auto; min-height: 40vh; position: relative; }
-  #map { position: absolute; inset: 0; }
-  #now { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; display: flex; gap: 10px; align-items: center;
-         background: rgb(20 20 20 / .78); color: #fff; border-radius: 12px; padding: 8px; backdrop-filter: blur(6px); max-width: 26rem; }
-  #now[hidden] { display: none; }
-  #now img { width: 96px; height: 72px; object-fit: cover; border-radius: 8px; flex: 0 0 auto; }
-  #now img[hidden] { display: none; }
-  .now-text { display: flex; flex-direction: column; min-width: 0; }
-  .now-text b { font-size: 1rem; line-height: 1.25; }
-  .now-text a { color: #cfd8e3; font-size: .75rem; text-decoration: none; }
-  #panel { flex: 0 0 auto; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
-  #place { margin: 0; font-weight: 600; min-height: 1.4em; }
-  #status { margin: 0; color: var(--muted); min-height: 1.4em; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; color: inherit; }
+
+  #map { position: fixed; inset: 0; }
+  .leaflet-control-attribution { font-size: 10px; }
+  .leaflet-bottom { bottom: var(--sheet-h, 0px); }
+
+  .top { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 1000;
+         display: flex; justify-content: space-between; align-items: center; gap: 8px; pointer-events: none; }
+  .top > * { pointer-events: auto; }
+  .pill { background: var(--bg); color: var(--fg); font-size: 13px; font-weight: 500; padding: 9px 14px; border-radius: 999px;
+          box-shadow: 0 2px 8px rgb(0 0 0 / .22); max-width: 75%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .round { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--bg); display: grid; place-items: center;
+           box-shadow: 0 2px 8px rgb(0 0 0 / .22); }
+
+  /* Bottom sheet: collapsed while walking (C1), pulled up to read and look (C2). */
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--bg); border-radius: 22px 22px 0 0;
+           box-shadow: 0 -6px 24px rgb(0 0 0 / .22); padding: 0 16px calc(16px + env(safe-area-inset-bottom));
+           display: flex; flex-direction: column; gap: 12px; max-height: 82vh; overflow: hidden; transition: max-height .25s ease; }
+  .sheet.open { overflow-y: auto; }
+  .grab { align-self: stretch; height: 26px; border: 0; background: transparent; display: grid; place-items: center; cursor: grab; touch-action: none; flex: 0 0 auto; }
+  .grab::before { content: ""; width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+
+  .idle h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  .idle p { margin: 4px 0 0; color: var(--muted); }
+  .wide { width: 100%; min-height: 56px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-fg); font-weight: 650; font-size: 17px; margin-top: 12px; }
+
+  .photo-big { display: none; width: 100%; height: 200px; object-fit: cover; border-radius: 16px; background: var(--photo); flex: 0 0 auto; }
+  .sheet.open .photo-big.has { display: block; }
+  .head { display: flex; gap: 12px; align-items: center; }
+  .thumb { width: 64px; height: 64px; border-radius: 12px; background: var(--photo); flex: 0 0 auto; overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sheet.open .thumb { display: none; }
+  .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+  .titles b { font-size: 18px; font-weight: 650; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet.open .titles b { font-size: 22px; white-space: normal; }
+  .titles span { font-size: 13px; color: var(--muted); }
+  .titles a { color: var(--muted); }
+  .play { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex: 0 0 auto; }
+
+  .progress { display: none; height: 4px; border-radius: 2px; background: var(--soft); }
+  .progress div { height: 100%; width: 0; border-radius: 2px; background: var(--accent); transition: width .3s; }
+  .sheet.open .progress { display: block; }
+
+  #caption { margin: 0; font-size: 15px; line-height: 1.45; color: var(--fg); min-height: 1.45em;
+             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sheet.open #caption { font-size: 17px; line-height: 1.55; display: block; }
+  #caption .said { color: var(--dim); }
+  #caption .now { color: var(--fg); }
+
+  .topics-label { display: none; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: -4px; }
+  .sheet.open .topics-label { display: block; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
+  .chips::-webkit-scrollbar { display: none; }
+  .sheet.open .chips { flex-wrap: wrap; overflow: visible; }
+  .chip { flex: 0 0 auto; min-height: 44px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); font-size: 14px; font-weight: 500; }
+  .chip.queued { border-color: var(--accent); color: var(--accent); }
+
+  .controls { display: none; align-items: center; justify-content: space-between; padding: 4px 6px 0; }
+  .sheet.open .controls { display: flex; }
+  .ctl { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--soft); display: grid; place-items: center; }
+  .ctl:disabled { opacity: .35; }
+
+  #status { margin: 0; font-size: 13px; color: var(--muted); min-height: 1.2em; }
   #status.err { color: var(--err); }
-  #caption { margin: 0; min-height: 2.9em; max-height: 6em; overflow: hidden; }
-  .controls { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; }
-  .controls button { padding: 14px 8px; font: 600 1rem system-ui, sans-serif; border-radius: 12px; border: 1px solid var(--accent); background: transparent; color: var(--accent); touch-action: manipulation; }
-  .controls button#main { background: var(--accent); color: var(--accent-fg); }
-  .controls button:disabled { opacity: .35; }
-  #meta { margin: 0; color: var(--muted); font-size: .8rem; }
-  #debug { margin: 0; font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; color: var(--muted); max-height: 30vh; overflow: auto; }
+  #meta { display: none; margin: 0; font-size: 12px; color: var(--muted); }
+  .sheet.open #meta { display: block; }
+  #debug { margin: 0; font: 11px/1.35 ui-monospace, monospace; white-space: pre-wrap; color: var(--muted); }
+  .sheet:not(.open) #debug { display: none; }
+
+  /* The "you are here" marker: dot plus a fading view cone, as in Google Maps. */
+  .me-icon { background: none; border: 0; }
+  .me-icon .cone { transform-origin: 60px 60px; transition: transform .25s linear; }
 </style>
 </head>
 <body>
-<div id="map-wrap">
-  <div id="map"></div>
-  <div id="now" hidden>
-    <img id="now-photo" alt="" hidden>
-    <div class="now-text"><b id="now-name"></b><a id="now-credit" target="_blank" rel="noopener"></a></div>
-  </div>
+<div id="map"></div>
+
+<div class="top">
+  <span id="pill" class="pill">History walk</span>
+  <button id="recentre" class="round" type="button" aria-label="Centre the map on me">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>
+  </button>
 </div>
-<section id="panel">
-  <p id="place"></p>
-  <p id="status"></p>
-  <p id="caption"></p>
-  <div class="controls">
-    <button id="main" type="button">Start</button>
-    <button id="skip" type="button">Skip</button>
-    <button id="stop" type="button">Stop</button>
+
+<section id="sheet" class="sheet" aria-label="Guide">
+  <button id="grab" class="grab" type="button" aria-label="Show more" aria-expanded="false"></button>
+
+  <div id="idle" class="idle">
+    <h1>Walk with a guide</h1>
+    <p id="idle-status">Tap Start and walk. The guide talks about what's around you.</p>
+    <button id="start" class="wide" type="button">Start walk</button>
   </div>
-  <p id="meta"></p>
-  <pre id="debug" hidden></pre>
+
+  <div id="live" style="display: none;">
+    <img id="photo-big" class="photo-big" alt="">
+    <div class="head">
+      <div class="thumb"><img id="photo" alt="" hidden></div>
+      <div class="titles">
+        <b id="title">Finding where you are…</b>
+        <span id="sub"></span>
+      </div>
+      <button id="play" class="play" type="button" aria-label="Pause"></button>
+    </div>
+    <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+    <p id="caption"></p>
+    <span class="topics-label">Hear more about</span>
+    <div id="chips" class="chips"></div>
+    <div class="controls">
+      <button id="replay" class="ctl" type="button" aria-label="Replay this part">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>
+      </button>
+      <button id="skip" class="ctl" type="button" aria-label="Skip">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l9 7-9 7z"></path><path d="M19 5v14"></path></svg>
+      </button>
+      <button id="stop" class="ctl" type="button" aria-label="End the walk">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>
+      </button>
+    </div>
+    <p id="status"></p>
+    <p id="meta"></p>
+    <pre id="debug" hidden></pre>
+  </div>
 </section>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>

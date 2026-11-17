@@ -112,3 +112,11 @@ test("standing still next to a well-covered place goes deeper", () => {
   assert.equal(plan.kind, "poi");
   if (plan.kind === "poi") assert.equal(plan.phase, "deeper");
 });
+
+import { mergePois } from "../../web/pois.js";
+
+test("overview and list articles are not treated as places", () => {
+  const page = (title) => ({ lang: "en", pageId: title.length, title, lat: 53.07, lon: 8.8, extract: "A page.", length: 5000 });
+  const names = mergePois([page("Bremen Roland"), page("Timeline of Bremen"), page("List of churches in Bremen")], []).map((p) => p.name);
+  assert.deepEqual(names, ["Bremen Roland"]);
+});

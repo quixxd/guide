@@ -136,7 +136,11 @@ export function planSummary(plan) {
 export async function prepareSegment(session, pos, focus = null) {
   const mode = detectMode(pos.speed);
   const place = await reverseGeocode(pos.lat, pos.lon).catch(() => null);
-  const pois = await poisAround(pos.lat, pos.lon, PROFILES[mode].horizon, localWikiLang(place?.countryCode)).catch(() => []);
+  const found = await poisAround(pos.lat, pos.lon, PROFILES[mode].horizon, localWikiLang(place?.countryCode)).catch(() => []);
+  // The town's, district's or region's own article is the area you're in, not a place you pass
+  // (otherwise "Bremen" turns up as a sight 200 m ahead). Area stories cover those.
+  const areaNames = new Set([place?.town, place?.neighbourhood, place?.region, place?.country].filter(Boolean).map((n) => n.toLowerCase()));
+  const pois = found.filter((p) => ![p.name, ...(p.altNames ?? [])].some((n) => areaNames.has(n.toLowerCase())));
   const areaName = areaNameFor(place);
   const input = {
     pos,

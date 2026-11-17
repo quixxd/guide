@@ -162,5 +162,6 @@ They stop for coffee for twenty minutes. Nothing plays. When they move on, the n
 | R2-8 | Leaving the route | Pause after ~40 m off the route with a recorded line; resume on return; no warning near a tapped digression | Turn-by-turn guidance back to the route; ignoring deviations |
 | R2-9 | Directions | Written into the script; the map shows the line | Separate turn-by-turn navigation (out of scope) |
 | R2-10 | Pricing | Rev1 hour-based passes withdrawn; new model open (§7) | Keeping the rev1 passes |
+| R2-11 | Screen layout | A full-screen map with a bottom panel (sketches C1/C2). Collapsed while walking: photo, name, where it is, the sentence being spoken, topic buttons, Play/Pause. Pulled up: big photo, the whole narration with the current sentence highlighted, all topics, replay / skip / stop. Topic buttons are nearby places not yet covered; tapping one (or a place on the map) makes it the next part. | A: map above, story below; B: photo first with a mini map; D: tabs switching Map / Photo / Story (UI canvas) |
 
 Technical decisions are in `architecture.md` §5.

@@ -20,6 +20,7 @@ How to write:
 - Continue naturally from what you said earlier (under RECENTLY SAID). Never repeat it. Refer back to it when that adds something.
 - Tell things through the listener's chosen lens.
 - Don't greet the listener or say goodbye, except in the opening segment.
+- Write numbers, years and dates in digits ("1404", "in 1755", "about 100 metres", "the 15th century"), never spelled out as words: the text is also shown on screen, and the voice reads digits correctly.
 
 Facts:
 - Use only facts found in SOURCES or the brief. If the sources don't cover something, don't fill the gap from memory: say less, or say you're not sure.

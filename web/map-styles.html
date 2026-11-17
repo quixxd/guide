@@ -35,13 +35,18 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
+  const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+  const ESRI_ATTR = "Tiles © Esri and contributors";
+  // CARTO (Voyager, Positron, Dark Matter) now answers "API key required", so it's left out.
   const STYLES = [
-    { name: "OpenStreetMap Standard", note: "Current. Detailed and busy.", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attr: "© OpenStreetMap contributors" },
-    { name: "CARTO Voyager", note: "Soft colours, clean labels. No key.", url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
-    { name: "CARTO Positron", note: "Very light grey, minimal. No key.", url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
-    { name: "CARTO Dark Matter", note: "Dark and minimal, for dark mode. No key.", url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
-    { name: "OpenTopoMap", note: "Contours and hill shading. Slow; max zoom 17. No key.", url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", attr: "© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)", maxZoom: 17 },
-    { name: "Esri World Imagery", note: "Satellite, no labels. Fine for testing; terms expect an ArcGIS account.", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr: "Tiles © Esri, Maxar, Earthstar Geographics" },
+    { name: "Esri satellite + street names", note: "Satellite with street and place names on top. Esri terms.", layers: [ESRI + "/World_Imagery/MapServer/tile/{z}/{y}/{x}", ESRI + "/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", ESRI + "/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR },
+    { name: "Esri satellite", note: "Current prototype map. No street names. Esri terms.", layers: [ESRI + "/World_Imagery/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR },
+    { name: "Esri Street", note: "Classic street map. Esri terms.", layers: [ESRI + "/World_Street_Map/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR },
+    { name: "Esri Topo", note: "Building footprints and terrain shading. Esri terms.", layers: [ESRI + "/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR },
+    { name: "Esri Light Gray", note: "Minimal; markers stand out. Ends at zoom 16, enlarged beyond.", layers: [ESRI + "/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", ESRI + "/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR, nativeZoom: 16 },
+    { name: "Esri Dark Gray", note: "Dark mode. Ends at zoom 16, enlarged beyond.", layers: [ESRI + "/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", ESRI + "/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"], attr: ESRI_ATTR, nativeZoom: 16 },
+    { name: "OpenStreetMap Standard", note: "Most detail, busy. No key; light use only.", layers: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], attr: "© OpenStreetMap contributors" },
+    { name: "OpenTopoMap", note: "Contours and hill shading. Slow; max zoom 17.", layers: ["https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"], attr: "© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)", maxZoom: 17 },
   ];
 
   const maps = [];
@@ -66,7 +71,7 @@
     fig.querySelector("span").textContent = style.note;
     document.getElementById("grid").append(fig);
     const map = L.map(fig.querySelector(".map"), { zoomControl: false }).setView(center, 17);
-    L.tileLayer(style.url, { maxZoom: style.maxZoom ?? 19, subdomains: "abc", attribution: style.attr }).addTo(map);
+    style.layers.forEach((url, i) => L.tileLayer(url, { maxZoom: style.maxZoom ?? 19, maxNativeZoom: style.nativeZoom ?? style.maxZoom ?? 19, subdomains: "abc", attribution: i === 0 ? style.attr : "" }).addTo(map));
     const group = L.layerGroup().addTo(map);
     samples(group, center);
     map.on("move", () => {

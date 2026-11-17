@@ -83,3 +83,11 @@ test("district and borough articles count as areas, not sights", () => {
   const byName = Object.fromEntries(pois.map((p) => [p.name, p.categories.includes("area")]));
   assert.deepEqual(byName, { Mitte: true, "Bremen Roland": false });
 });
+
+import { describeSide, relativePosition } from "../../web/geo.js";
+
+test("directions never use compass names when the facing direction is unknown", () => {
+  const rel = relativePosition(here, null, at(50, -50));
+  assert.equal(describeSide(rel), "nearby");
+  assert.equal(describeSide(relativePosition(here, 0, at(50, -50))), "on your left");
+});

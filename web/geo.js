@@ -79,6 +79,8 @@ export function describeSide(rel) {
     case "behind":
       return "behind you";
     default:
-      return `to the ${compassName(rel.bearing)}`;
+      // Which way the listener faces is unknown. Compass directions ("to the north-west") mean
+      // little to people on a walk, so say only that it's close by.
+      return "nearby";
   }
 }

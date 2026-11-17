@@ -359,7 +359,11 @@ async function start(lensId = "history") {
     }, SIM_SPEED);
     status("Walk with the arrow keys (Shift to go faster).");
   } else {
-    state.source = new GpsSource(onPosition, (msg) => status(`Location: ${msg}`, true));
+    stopIdleLocation();
+    state.source = new GpsSource((p) => {
+      onPosition(p);
+      rememberPlace(p);
+    }, (msg) => status(`Location: ${msg}`, true));
   }
   state.source.start();
   startNext();
@@ -417,6 +421,7 @@ function stop() {
   showLive(false);
   setSheetState("peek");
   $("pill").textContent = "Chatty Joe";
+  showWhereYouAre(); // back on the start screen: keep showing where you are
   status("Pick a walk and go. Joe talks about what's around you.");
   renderControls();
 }
@@ -939,9 +944,24 @@ function updateMeta() {
 
 // ---------- Map ----------
 
-const initialView = SIM ? SIM.points[0] : KEYS ? [keyStart().lat, keyStart().lon] : [38.7115, -9.1365];
+// Where the map opens: the simulated route or keyboard walk on desktop; on a phone, the last known
+// position (then the live one, see showWhereYouAre), or Europe zoomed out the very first time.
+function lastPlace() {
+  try {
+    const p = JSON.parse(store.get("guide.lastPos") || "null");
+    return p && Number.isFinite(p.lat) && Number.isFinite(p.lon) ? p : null;
+  } catch {
+    return null;
+  }
+}
+function rememberPlace(p) {
+  store.set("guide.lastPos", JSON.stringify({ lat: p.lat, lon: p.lon }));
+}
+const LAST = lastPlace();
+const initialView = SIM ? SIM.points[0] : KEYS ? [keyStart().lat, keyStart().lon] : LAST ? [LAST.lat, LAST.lon] : [50, 10];
+const initialZoom = SIM || KEYS || LAST ? 17 : 4;
 // keyboard: false, so the arrow keys walk instead of panning the map.
-const map = L.map("map", { zoomControl: false, attributionControl: true, keyboard: false }).setView(initialView, 17);
+const map = L.map("map", { zoomControl: false, attributionControl: true, keyboard: false }).setView(initialView, initialZoom);
 // Esri World Topo. Esri's terms expect an ArcGIS account beyond development use; fine for the prototype.
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {
   maxZoom: 19,
@@ -1278,5 +1298,27 @@ $("install-ios").hidden = !(IOS && !STANDALONE);
 $("idle-keys").hidden = !KEYS;
 updateMeta();
 setSheetState("peek", false);
+
+// On a phone, show where you are on the start screen already: the browser asks for location once,
+// and the dot follows you until a walk starts (then the walk's GPS takes over).
+let idleWatch = null;
+function showWhereYouAre() {
+  if (SIM || KEYS || !("geolocation" in navigator)) return;
+  idleWatch = navigator.geolocation.watchPosition(
+    (p) => {
+      if (state.running) return;
+      const here = { lat: p.coords.latitude, lon: p.coords.longitude, heading: null, speed: null, accuracy: p.coords.accuracy ?? 50 };
+      rememberPlace(here);
+      showPosition(here);
+    },
+    () => {}, // refused or unavailable: the map stays at the last known place
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 },
+  );
+}
+function stopIdleLocation() {
+  if (idleWatch !== null) navigator.geolocation.clearWatch(idleWatch);
+  idleWatch = null;
+}
+showWhereYouAre();
 renderControls();
 status(token ? "Pick a walk and go. Joe talks about what's around you." : "Enter your access key to start.", !token);

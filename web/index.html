@@ -75,12 +75,12 @@
 
   /* Progress ring around Play: how much of this part has been spoken. */
   .play-wrap { position: relative; width: 66px; height: 66px; display: grid; place-items: center; flex: 0 0 auto; }
-  .ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  /* The ring sits over the button: let taps go through to it. */
+  .ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
   .ring circle { fill: none; stroke-width: 3; }
   .ring-track { stroke: var(--line); }
   .ring-fill { stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 188.5; stroke-dashoffset: 188.5; transition: stroke-dashoffset .4s ease; }
-  .sheet.min .play-wrap { width: 44px; height: 44px; }
-  .sheet.min .ring { display: none; }
+  .sheet.min .play-wrap { width: 52px; height: 52px; }
   .play { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex: 0 0 auto; }
 
   .progress { height: 4px; border-radius: 2px; background: var(--line); flex: 0 0 auto; }
@@ -118,10 +118,13 @@
 
   /* Third state: pushed all the way down to a strip with just the title and Play. */
   .sheet.min .body { display: none; }
-  .sheet.min .thumb, .sheet.min .sub { display: none; }
+  /* The strip keeps the essentials on one line: name, arrow and distance, Play with its ring. */
+  .sheet.min .thumb { display: none; }
   .sheet.min .head { padding-bottom: 8px; }
-  .sheet.min .play { width: 44px; height: 44px; }
-  .sheet.min .titles b { font-size: 16px; }
+  .sheet.min .play { width: 42px; height: 42px; }
+  .sheet.min .titles { flex-direction: row; align-items: center; gap: 10px; }
+  .sheet.min .titles b { font-size: 16px; min-width: 0; }
+  .sheet.min .sub { flex: 0 0 auto; }
 
   .thumb img, .photo-big { cursor: zoom-in; }
 
